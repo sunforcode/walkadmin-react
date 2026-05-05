@@ -1,0 +1,131 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f5f7fa;
+  color: #333;
+  line-height: 1.6;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.ant-layout {
+  min-height: 100vh;
+}
+
+.ant-layout-sider {
+  overflow: auto;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 1000;
+}
+
+.ant-layout-sider + .ant-layout {
+  margin-left: 240px;
+}
+
+.ant-layout-header {
+  position: sticky;
+  top: 0;
+  z-index: 999;
+  background: #fff;
+  padding: 0 24px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.ant-layout-content {
+  margin: 24px;
+  padding: 24px;
+  background: #fff;
+  border-radius: 8px;
+  min-height: 280px;
+  overflow: auto;
+}
+
+.ant-menu-item {
+  transition: all 0.3s;
+}
+
+.ant-btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+}
+
+.ant-btn-primary:hover {
+  background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+}
+
+.ant-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.ant-table-thead > tr > th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: #f8fafc;
+}
+
+.ant-tag {
+  border: none;
+  font-weight: 500;
+}
+
+.ant-modal-content {
+  border-radius: 12px;
+}
+
+.ant-descriptions-bordered .ant-descriptions-item-label {
+  background: #f8fafc;
+  font-weight: 500;
+}
+
+@media (max-width: 768px) {
+  .ant-layout-sider {
+    position: relative !important;
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    flex: 0 0 80px !important;
+    height: auto !important;
+    z-index: auto !important;
+  }
+
+  .ant-layout-sider + .ant-layout {
+    margin-left: 0 !important;
+  }
+
+  .ant-layout-sider .logo h2 {
+    display: none;
+  }
+
+  .ant-layout-sider .ant-menu-item span:last-child {
+    display: none;
+  }
+
+  .ant-layout-header {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .ant-layout-content {
+    margin-left: 0 !important;
+    margin: 16px;
+    padding: 16px;
+  }
+}

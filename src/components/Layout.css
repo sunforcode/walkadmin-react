@@ -1,0 +1,43 @@
+.logo {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.logo h2 {
+  color: white;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.ant-layout-sider-children {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.ant-menu {
+  flex: 1;
+  border-right: none;
+}
+
+@media (max-width: 768px) {
+  .ant-layout-sider {
+    position: relative;
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+    flex: 0 0 80px !important;
+  }
+
+  .ant-layout-sider .logo h2 {
+    display: none;
+  }
+
+  .ant-layout-sider .ant-menu-item span:last-child {
+    display: none;
+  }
+}
