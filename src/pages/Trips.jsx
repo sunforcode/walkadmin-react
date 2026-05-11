@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin } from 'antd';
 import { SearchOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons';
-import { tripApi, mockDataGenerator, formatTimestamp, getTripStatusText, getTripStatusColor } from '../services/api';
+import { tripApi, formatTimestamp, getTripStatusText, getTripStatusColor } from '../services/api';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -16,7 +16,6 @@ const Trips = () => {
   const [selectedStatus, setSelectedStatus] = useState(undefined);
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [useMockData, setUseMockData] = useState(false);
 
   useEffect(() => {
     loadTrips();
@@ -27,22 +26,18 @@ const Trips = () => {
     try {
       const response = await tripApi.getTrips(currentPage - 1, pageSize, searchText, selectedStatus);
       
-      if (response && response.content && response.content.length > 0) {
+      if (response && response.content) {
         setData(response.content);
         setTotal(response.totalElements || 0);
-        setUseMockData(false);
       } else {
-        const mockData = mockDataGenerator.generateMockTrips(pageSize);
-        setData(mockData.content);
-        setTotal(mockData.totalElements);
-        setUseMockData(true);
+        setData([]);
+        setTotal(0);
       }
     } catch (error) {
       console.error('加载行程列表失败:', error);
-      const mockData = mockDataGenerator.generateMockTrips(pageSize);
-      setData(mockData.content);
-      setTotal(mockData.totalElements);
-      setUseMockData(true);
+      message.error('加载行程列表失败');
+      setData([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -122,7 +117,6 @@ const Trips = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>行程管理</h2>
-        {useMockData && <Tag color="orange">演示模式</Tag>}
       </div>
       
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
@@ -134,7 +128,7 @@ const Trips = () => {
             style={{ width: 250 }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            onSearch={(value) => {
+            onSearch={() => {
               setCurrentPage(1);
               loadTrips();
             }}
@@ -159,12 +153,6 @@ const Trips = () => {
         <Button icon={<ReloadOutlined />} onClick={loadTrips}>
           刷新
         </Button>
-      </div>
-
-      <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 8 }}>
-        <p style={{ margin: 0, color: '#1890ff' }}>
-          <strong>说明：</strong>行程状态是业务状态（规划中/进行中/已完成/已取消），管理员需要查看这些状态来了解平台上的活动情况。
-        </p>
       </div>
 
       <Spin spinning={loading}>

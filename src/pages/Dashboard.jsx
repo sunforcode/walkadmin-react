@@ -6,7 +6,7 @@ import {
   RocketOutlined,
   BookOutlined,
 } from '@ant-design/icons';
-import { userApi, routeApi, tripApi, guideApi, mockDataGenerator } from '../services/api';
+import { userApi, routeApi, tripApi, guideApi } from '../services/api';
 
 const Dashboard = () => {
   const [loading, setLoading] = useState(false);
@@ -24,51 +24,29 @@ const Dashboard = () => {
   const loadStats = async () => {
     setLoading(true);
     try {
-      const [usersRes, routesRes, tripsRes, guidesRes] = await Promise.all([
+      const results = await Promise.allSettled([
         userApi.getUsers(0, 1),
         routeApi.getRoutes(0, 1),
         tripApi.getTrips(0, 1),
         guideApi.getGuides(0, 1),
       ]);
 
-      let userTotal = usersRes?.totalElements || 0;
-      let routeTotal = routesRes?.totalElements || 0;
-      let tripTotal = tripsRes?.totalElements || 0;
-      let guideTotal = guidesRes?.totalElements || 0;
-
-      if (userTotal === 0 && routeTotal === 0 && tripTotal === 0 && guideTotal === 0) {
-        const mockUsers = mockDataGenerator.generateMockUsers(1);
-        const mockRoutes = mockDataGenerator.generateMockRoutes(1);
-        const mockTrips = mockDataGenerator.generateMockTrips(1);
-        const mockGuides = mockDataGenerator.generateMockGuides(1);
-        
-        userTotal = mockUsers.totalElements;
-        routeTotal = mockRoutes.totalElements;
-        tripTotal = mockTrips.totalElements;
-        guideTotal = mockGuides.totalElements;
-        message.info('使用演示数据');
+      const [usersRes, routesRes, tripsRes, guidesRes] = results;
+      
+      const failed = results.filter(r => r.status === 'rejected');
+      if (failed.length > 0) {
+        message.error(`部分数据加载失败（${failed.length}/${results.length}）`);
       }
 
       setStats({
-        users: userTotal,
-        routes: routeTotal,
-        trips: tripTotal,
-        guides: guideTotal,
+        users: usersRes.status === 'fulfilled' ? (usersRes.value?.totalElements || 0) : 0,
+        routes: routesRes.status === 'fulfilled' ? (routesRes.value?.totalElements || 0) : 0,
+        trips: tripsRes.status === 'fulfilled' ? (tripsRes.value?.totalElements || 0) : 0,
+        guides: guidesRes.status === 'fulfilled' ? (guidesRes.value?.totalElements || 0) : 0,
       });
     } catch (error) {
       console.error('加载统计数据失败:', error);
-      const mockUsers = mockDataGenerator.generateMockUsers(1);
-      const mockRoutes = mockDataGenerator.generateMockRoutes(1);
-      const mockTrips = mockDataGenerator.generateMockTrips(1);
-      const mockGuides = mockDataGenerator.generateMockGuides(1);
-      
-      setStats({
-        users: mockUsers.totalElements,
-        routes: mockRoutes.totalElements,
-        trips: mockTrips.totalElements,
-        guides: mockGuides.totalElements,
-      });
-      message.info('使用演示数据');
+      message.error('加载统计数据失败');
     } finally {
       setLoading(false);
     }

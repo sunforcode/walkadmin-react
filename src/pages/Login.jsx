@@ -25,24 +25,11 @@ const Login = () => {
         message.success('登录成功');
         navigate('/dashboard');
       } else {
-        throw new Error(response.message || '登录失败');
+        message.error(response.message || '登录失败');
       }
     } catch (error) {
       console.error('登录错误:', error);
-      
-      if (values.email && values.password) {
-        const mockToken = `mock_token_${Date.now()}`;
-        const mockUser = { 
-          email: values.email, 
-          username: values.email.split('@')[0] 
-        };
-        
-        login(mockToken, mockUser);
-        message.success('登录成功（演示模式）');
-        navigate('/dashboard');
-      } else {
-        message.error('请输入邮箱和密码');
-      }
+      message.error('登录失败，请检查账号密码或网络连接');
     } finally {
       setLoading(false);
     }
@@ -93,10 +80,6 @@ const Login = () => {
             </Form.Item>
           </Form>
         </Spin>
-        
-        <div className="login-footer">
-          <p>演示模式：输入任意邮箱和密码即可登录</p>
-        </div>
       </Card>
     </div>
   );

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin } from 'antd';
-import { SearchOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons';
-import { routeApi, mockDataGenerator, formatTimestamp, getDifficultyText, getDifficultyTagColor } from '../services/api';
+import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin, Tabs, Collapse, Badge } from 'antd';
+import { SearchOutlined, ReloadOutlined, EyeOutlined, EnvironmentOutlined, ThunderboltOutlined, TeamOutlined, ShopOutlined, PushpinOutlined } from '@ant-design/icons';
+import { routeApi, formatTimestamp, getDifficultyText, getDifficultyTagColor } from '../services/api';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -16,7 +16,7 @@ const Routes = () => {
   const [selectedDifficulty, setSelectedDifficulty] = useState(undefined);
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [useMockData, setUseMockData] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     loadRoutes();
@@ -27,30 +27,36 @@ const Routes = () => {
     try {
       const response = await routeApi.getRoutes(currentPage - 1, pageSize, searchText, selectedDifficulty);
       
-      if (response && response.content && response.content.length > 0) {
+      if (response && response.content) {
         setData(response.content);
         setTotal(response.totalElements || 0);
-        setUseMockData(false);
       } else {
-        const mockData = mockDataGenerator.generateMockRoutes(pageSize);
-        setData(mockData.content);
-        setTotal(mockData.totalElements);
-        setUseMockData(true);
+        setData([]);
+        setTotal(0);
       }
     } catch (error) {
       console.error('加载路线列表失败:', error);
-      const mockData = mockDataGenerator.generateMockRoutes(pageSize);
-      setData(mockData.content);
-      setTotal(mockData.totalElements);
-      setUseMockData(true);
+      message.error('加载路线列表失败');
+      setData([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
   };
 
-  const showRouteDetail = (route) => {
-    setSelectedRoute(route);
+  const showRouteDetail = async (route) => {
     setDetailModalVisible(true);
+    setSelectedRoute(route);
+    setDetailLoading(true);
+    try {
+      const detail = await routeApi.getRouteById(route.id);
+      setSelectedRoute(detail);
+    } catch (error) {
+      console.error('加载路线详情失败:', error);
+      message.error('加载详情失败');
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const columns = [
@@ -122,7 +128,6 @@ const Routes = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>路线管理</h2>
-        {useMockData && <Tag color="orange">演示模式</Tag>}
       </div>
       
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
@@ -134,7 +139,7 @@ const Routes = () => {
             style={{ width: 250 }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            onSearch={(value) => {
+            onSearch={() => {
               setCurrentPage(1);
               loadRoutes();
             }}
@@ -160,12 +165,6 @@ const Routes = () => {
         <Button icon={<ReloadOutlined />} onClick={loadRoutes}>
           刷新
         </Button>
-      </div>
-
-      <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8 }}>
-        <p style={{ margin: 0, color: '#52c41a' }}>
-          <strong>说明：</strong>路线本身没有"状态"字段（如发布/审核状态），路线只是用户创建的内容。后台管理中路线展示的是路线的基本信息（名称、区域、难度、人气等）。
-        </p>
       </div>
 
       <Spin spinning={loading}>
@@ -197,20 +196,131 @@ const Routes = () => {
             关闭
           </Button>,
         ]}
-        width={600}
+        width={800}
       >
+        <Spin spinning={detailLoading}>
         {selectedRoute && (
-          <Descriptions bordered column={1}>
-            <Descriptions.Item label="路线ID">{selectedRoute.id}</Descriptions.Item>
-            <Descriptions.Item label="路线名称">{selectedRoute.name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="区域">{selectedRoute.region || '-'}</Descriptions.Item>
-            <Descriptions.Item label="难度">{getDifficultyText(selectedRoute.difficulty) || '-'}</Descriptions.Item>
-            <Descriptions.Item label="人气值">{selectedRoute.popularity || 0}</Descriptions.Item>
-            <Descriptions.Item label="创建者">{selectedRoute.createdBy || '-'}</Descriptions.Item>
-            <Descriptions.Item label="描述">{selectedRoute.description || '-'}</Descriptions.Item>
-            <Descriptions.Item label="创建时间">{formatTimestamp(selectedRoute.createdAt)}</Descriptions.Item>
-          </Descriptions>
+          <Tabs
+            defaultActiveKey="basic"
+            items={[
+              {
+                key: 'basic',
+                label: '基本信息',
+                children: (
+                  <Descriptions bordered column={2} size="small">
+                    <Descriptions.Item label="路线ID" span={2}>{selectedRoute.id}</Descriptions.Item>
+                    <Descriptions.Item label="路线名称">{selectedRoute.name || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="区域">{selectedRoute.region || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="难度">
+                      <Tag color={getDifficultyTagColor(selectedRoute.difficulty)}>{getDifficultyText(selectedRoute.difficulty)}</Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="是否环线">{selectedRoute.is_loop ? '是' : '否'}</Descriptions.Item>
+                    <Descriptions.Item label="距离">{selectedRoute.distance ? `${selectedRoute.distance} km` : '-'}</Descriptions.Item>
+                    <Descriptions.Item label="爬升">{selectedRoute.elevation_gain ? `${selectedRoute.elevation_gain} m` : '-'}</Descriptions.Item>
+                    <Descriptions.Item label="下降">{selectedRoute.elevation_loss ? `${selectedRoute.elevation_loss} m` : '-'}</Descriptions.Item>
+                    <Descriptions.Item label="人气值">{selectedRoute.popularity || 0}</Descriptions.Item>
+                    <Descriptions.Item label="状态">
+                      {selectedRoute.status === 0 && <Tag color="default">规划中</Tag>}
+                      {selectedRoute.status === 1 && <Tag color="success">已发布</Tag>}
+                      {selectedRoute.status === 2 && <Tag color="default">已关闭</Tag>}
+                      {selectedRoute.status === 3 && <Tag color="processing">分析中</Tag>}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="创建时间">{formatTimestamp(selectedRoute.created_at || selectedRoute.createdAt)}</Descriptions.Item>
+                    <Descriptions.Item label="描述" span={2}>{selectedRoute.description || '-'}</Descriptions.Item>
+                  </Descriptions>
+                )
+              },
+              {
+                key: 'segments',
+                label: (
+                  <span><ThunderboltOutlined /> 路段 <Badge count={selectedRoute.segments?.length || 0} style={{ backgroundColor: '#1677ff' }} /></span>
+                ),
+                children: selectedRoute.segments?.length > 0 ? (
+                  <Collapse
+                    size="small"
+                    items={selectedRoute.segments.map((seg, i) => ({
+                      key: i,
+                      label: `${seg.name || `路段${i + 1}`}  ${seg.distance ? seg.distance + ' km' : ''} ${seg.elevation_gain ? '↑' + seg.elevation_gain + 'm' : ''}`,
+                      children: (
+                        <Descriptions size="small" column={2}>
+                          <Descriptions.Item label="距离">{seg.distance ? `${seg.distance} km` : '-'}</Descriptions.Item>
+                          <Descriptions.Item label="爬升">{seg.elevation_gain ? `${seg.elevation_gain} m` : '-'}</Descriptions.Item>
+                          <Descriptions.Item label="下降">{seg.elevation_loss ? `${seg.elevation_loss} m` : '-'}</Descriptions.Item>
+                          <Descriptions.Item label="预计用时">{seg.estimated_time ? `${seg.estimated_time} 分钟` : '-'}</Descriptions.Item>
+                          <Descriptions.Item label="难度">{getDifficultyText(seg.difficulty)}</Descriptions.Item>
+                          <Descriptions.Item label="类型">{seg.segment_type || '-'}</Descriptions.Item>
+                          {seg.description && <Descriptions.Item label="描述" span={2}>{seg.description}</Descriptions.Item>}
+                        </Descriptions>
+                      )
+                    }))}
+                  />
+                ) : <div style={{ color: '#999', textAlign: 'center', padding: 16 }}>暂无路段数据</div>
+              },
+              {
+                key: 'pois',
+                label: (
+                  <span><EnvironmentOutlined /> POI</span>
+                ),
+                children: (
+                  <div>
+                    {(selectedRoute.water_sources?.length > 0) && (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 8 }}>💧 水源 ({selectedRoute.water_sources.length})</div>
+                        {selectedRoute.water_sources.map((ws, i) => (
+                          <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0' }}>
+                            <Tag color="blue">{ws.name}</Tag>
+                            {ws.source_type && <Tag>{ws.source_type}</Tag>}
+                            {ws.description && <span style={{ color: '#666', fontSize: 12 }}>{ws.description}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(selectedRoute.campsites?.length > 0) && (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 8 }}>⛺ 营地 ({selectedRoute.campsites.length})</div>
+                        {selectedRoute.campsites.map((camp, i) => (
+                          <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0' }}>
+                            <Tag color="green">{camp.name}</Tag>
+                            {camp.description && <span style={{ color: '#666', fontSize: 12 }}>{camp.description}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(selectedRoute.supplies?.length > 0) && (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 8 }}>🏪 补给点 ({selectedRoute.supplies.length})</div>
+                        {selectedRoute.supplies.map((sup, i) => (
+                          <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0' }}>
+                            <Tag color="orange">{sup.name}</Tag>
+                            {sup.supply_type && <Tag>{sup.supply_type}</Tag>}
+                            {sup.description && <span style={{ color: '#666', fontSize: 12 }}>{sup.description}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(selectedRoute.marker_points?.length > 0) && (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 8 }}>📍 标记点 ({selectedRoute.marker_points.length})</div>
+                        {selectedRoute.marker_points.map((mp, i) => (
+                          <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid #f0f0f0' }}>
+                            <Tag color="purple">{mp.name}</Tag>
+                            {mp.marker_type && <Tag>{mp.marker_type}</Tag>}
+                            {mp.elevation && <Tag>{mp.elevation}m</Tag>}
+                            {mp.description && <span style={{ color: '#666', fontSize: 12 }}>{mp.description}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!selectedRoute.water_sources?.length && !selectedRoute.campsites?.length && !selectedRoute.supplies?.length && !selectedRoute.marker_points?.length && (
+                      <div style={{ color: '#999', textAlign: 'center', padding: 16 }}>暂无 POI 数据</div>
+                    )}
+                  </div>
+                )
+              }
+            ]}
+          />
         )}
+        </Spin>
       </Modal>
     </div>
   );

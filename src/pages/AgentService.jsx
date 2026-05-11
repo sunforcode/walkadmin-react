@@ -8,19 +8,14 @@ import {
   Select,
   Switch,
   message,
-  Spin,
   Progress,
-  Descriptions,
   Tag,
   Divider,
-  Table,
-  Tabs,
   Space,
-  Row,
-  Col,
-  Statistic,
   Alert,
   Typography,
+  Upload,
+  Radio,
 } from 'antd';
 
 const { Text } = Typography;
@@ -31,37 +26,124 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ApiOutlined,
-  FileTextOutlined,
-  SafetyCertificateOutlined,
-  ShoppingOutlined,
-  WarningOutlined,
+  LinkOutlined,
+  UploadOutlined,
+  EyeOutlined,
+  WifiOutlined,
 } from '@ant-design/icons';
-import { agentServiceApi } from '../services/api';
+import { agentServiceApi, routeApi } from '../services/api';
+import { useNavigate } from 'react-router-dom';
 
-const { TextArea } = Input;
 const { Option } = Select;
-const { TabPane } = Tabs;
+
+// walkbg 后端 base URL（与 api.js 保持一致）
+const WALKBG_BASE_URL = 'http://localhost:8080/walkbg';
 
 const AgentService = () => {
   const [form] = Form.useForm();
+  const navigate = useNavigate();
+
   const [healthStatus, setHealthStatus] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState(null);
-  const [taskStatus, setTaskStatus] = useState(null);
-  const [taskResult, setTaskResult] = useState(null);
-  const [isPolling, setIsPolling] = useState(false);
-  const [activeTab, setActiveTab] = useState('submit');
-  const pollingRef = useRef(null);
+  const [currentRouteId, setCurrentRouteId] = useState(null);
+  const [kmlInputMode, setKmlInputMode] = useState('url'); // 'url' | 'file'
+  const [uploadedKmlContent, setUploadedKmlContent] = useState(null);
+  const [uploadedFileName, setUploadedFileName] = useState(null);
+
+  // SSE 进度状态
+  const [taskProgress, setTaskProgress] = useState(null);
+  // taskProgress 结构: { status, progress, currentStep, routeId, error }
+
+  // SSE 连接状态
+  const [sseConnected, setSseConnected] = useState(false);
+  const [sseDisconnected, setSseDisconnected] = useState(false);
+
+  // 模拟进度动画（processing 中从 10 缓慢增长到 90）
+  const [animatedProgress, setAnimatedProgress] = useState(0);
+  const progressAnimRef = useRef(null);
+
+  // SSE EventSource 引用（cleanup 使用）
+  const eventSourceRef = useRef(null);
+
+  // 路线搜索相关
+  const [routeOptions, setRouteOptions] = useState([]);
+  const [routeSearchLoading, setRouteSearchLoading] = useState(false);
 
   useEffect(() => {
     checkHealth();
+    loadDefaultRoutes();
     return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
+      // 组件 unmount 时关闭 SSE 连接，防止内存泄漏（4.6）
+      closeEventSource();
+      if (progressAnimRef.current) {
+        clearInterval(progressAnimRef.current);
       }
     };
   }, []);
+
+  // 监听 taskProgress 变化，同步 animatedProgress
+  useEffect(() => {
+    if (!taskProgress) return;
+
+    if (taskProgress.status === 'completed') {
+      // 分析完成，跳到 100%
+      if (progressAnimRef.current) clearInterval(progressAnimRef.current);
+      setAnimatedProgress(100);
+      setCurrentRouteId(taskProgress.routeId);
+    } else if (taskProgress.status === 'failed') {
+      // 失败，停止动画
+      if (progressAnimRef.current) clearInterval(progressAnimRef.current);
+    } else if (taskProgress.status === 'processing') {
+      // 收到初始 processing 事件（progress=10），启动缓慢动画到 90%
+      setAnimatedProgress(taskProgress.progress || 10);
+      startProgressAnimation(taskProgress.progress || 10);
+    }
+  }, [taskProgress]);
+
+  /**
+   * 启动缓慢进度条动画
+   * processing 阶段：从 startVal 缓慢爬到 90（每 2 秒 +1），等待 completed 跳 100
+   */
+  const startProgressAnimation = (startVal) => {
+    if (progressAnimRef.current) clearInterval(progressAnimRef.current);
+    let current = startVal;
+    progressAnimRef.current = setInterval(() => {
+      if (current < 90) {
+        current += 1;
+        setAnimatedProgress(current);
+      } else {
+        clearInterval(progressAnimRef.current);
+      }
+    }, 2000);
+  };
+
+  const closeEventSource = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+      setSseConnected(false);
+    }
+  };
+
+  const loadDefaultRoutes = async () => {
+    setRouteSearchLoading(true);
+    try {
+      const result = await routeApi.getRoutes(0, 20);
+      const content = result?.content || result || [];
+      setRouteOptions(
+        content.map((r) => ({
+          value: r.id,
+          label: `${r.name}${r.region ? ` · ${r.region}` : ''}`,
+        }))
+      );
+    } catch (error) {
+      console.error('加载路线列表失败:', error);
+    } finally {
+      setRouteSearchLoading(false);
+    }
+  };
 
   const checkHealth = async () => {
     setHealthLoading(true);
@@ -78,30 +160,140 @@ const AgentService = () => {
     }
   };
 
-  const startPolling = (taskId) => {
-    setIsPolling(true);
-    pollingRef.current = setInterval(async () => {
+  const handleRouteSearch = async (keyword) => {
+    if (!keyword || keyword.length < 1) {
+      loadDefaultRoutes();
+      return;
+    }
+    setRouteSearchLoading(true);
+    try {
+      const result = await routeApi.getRoutes(0, 20, keyword);
+      const content = result?.content || result || [];
+      setRouteOptions(
+        content.map((r) => ({
+          value: r.id,
+          label: `${r.name}${r.region ? ` · ${r.region}` : ''}`,
+        }))
+      );
+    } catch (error) {
+      console.error('搜索路线失败:', error);
+      setRouteOptions([]);
+    } finally {
+      setRouteSearchLoading(false);
+    }
+  };
+
+  /**
+   * 建立 SSE 连接，订阅分析进度（4.1）
+   */
+  const connectSse = (taskId) => {
+    // 关闭旧连接（如有）
+    closeEventSource();
+
+    setSseDisconnected(false);
+    setAnimatedProgress(0);
+    setTaskProgress({ status: 'pending', progress: 0, currentStep: '等待分析任务启动...' });
+
+    const sseUrl = `${WALKBG_BASE_URL}/api/v1/route-analysis/tasks/${taskId}/stream`;
+    console.log('[SSE] 建立连接:', sseUrl);
+
+    const es = new EventSource(sseUrl);
+    eventSourceRef.current = es;
+
+    // 连接建立
+    es.onopen = () => {
+      setSseConnected(true);
+      console.log('[SSE] 连接已建立');
+    };
+
+    // 监听 progress 事件（4.2）
+    es.addEventListener('progress', (e) => {
       try {
-        const response = await agentServiceApi.getTaskStatus(taskId);
-        setTaskStatus(response);
-        
-        if (response.status === 'completed' || response.status === 'failed') {
-          clearInterval(pollingRef.current);
-          setIsPolling(false);
-          if (response.status === 'completed' && response.result) {
-            setTaskResult(response.result);
-            message.success('分析任务完成！');
-          } else if (response.status === 'failed') {
-            message.error(`分析任务失败: ${response.error || '未知错误'}`);
-          }
+        const data = JSON.parse(e.data);
+        console.log('[SSE] 收到进度事件:', data);
+        setTaskProgress(data);
+
+        if (data.status === 'completed') {
+          // 4.3: 分析完成
+          message.success('分析任务完成！路线数据已更新');
+          closeEventSource();
+        } else if (data.status === 'failed') {
+          // 4.4: 分析失败
+          message.error(`分析任务失败: ${data.error || '未知错误'}`);
+          closeEventSource();
         }
-      } catch (error) {
-        console.error('轮询任务状态失败:', error);
-        clearInterval(pollingRef.current);
-        setIsPolling(false);
-        message.error('查询任务状态失败');
+      } catch (err) {
+        console.error('[SSE] 解析事件数据失败:', err);
       }
-    }, 2000);
+    });
+
+    // 兼容默认 message 事件（无 event name 时）
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.log('[SSE] 收到 message 事件:', data);
+        setTaskProgress(data);
+
+        if (data.status === 'completed') {
+          message.success('分析任务完成！路线数据已更新');
+          closeEventSource();
+        } else if (data.status === 'failed') {
+          message.error(`分析任务失败: ${data.error || '未知错误'}`);
+          closeEventSource();
+        }
+      } catch (err) {
+        console.error('[SSE] 解析 message 事件失败:', err);
+      }
+    };
+
+    // SSE 连接断开（4.5）
+    es.onerror = (e) => {
+      console.warn('[SSE] 连接出错或断开:', e);
+      // EventSource 在连接关闭后会持续触发 onerror，需判断 readyState
+      if (es.readyState === EventSource.CLOSED) {
+        setSseConnected(false);
+        setSseDisconnected(true);
+        console.log('[SSE] 连接已关闭');
+      }
+    };
+  };
+
+  /**
+   * 手动刷新任务状态（降级轮询，4.5）
+   */
+  const handleManualRefresh = async () => {
+    if (!currentTaskId) return;
+    try {
+      const response = await agentServiceApi.getTaskStatus(currentTaskId);
+      if (response) {
+        setTaskProgress({
+          status: response.status,
+          progress: response.progress || 0,
+          currentStep: response.current_step || response.currentStep,
+          error: response.error,
+        });
+        if (response.status === 'completed') {
+          message.success('任务已完成');
+          setSseDisconnected(false);
+        }
+      }
+    } catch (error) {
+      message.error('查询状态失败');
+    }
+  };
+
+  const handleFileUpload = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setUploadedKmlContent(e.target.result);
+      setUploadedFileName(file.name);
+      message.success(`已加载文件: ${file.name}`);
+    };
+    reader.onerror = () => {
+      message.error('文件读取失败');
+    };
+    reader.readAsText(file, 'UTF-8');
+    return false;
   };
 
   const handleSubmit = async (values) => {
@@ -110,14 +302,32 @@ const AgentService = () => {
       return;
     }
 
+    if (kmlInputMode === 'url' && !values.kml_source) {
+      message.error('请输入 KML 文件 URL');
+      return;
+    }
+    if (kmlInputMode === 'file' && !uploadedKmlContent) {
+      message.error('请选择 KML 文件');
+      return;
+    }
+
     setSubmitLoading(true);
     try {
       const requestData = {
-        kml_source: values.kml_source,
+        kml_source: kmlInputMode === 'url' ? values.kml_source : (uploadedFileName || 'uploaded.kml'),
         enable_content_generation: values.enable_content_generation,
         enable_poi_query: values.enable_poi_query,
         poi_search_radius: values.poi_search_radius,
       };
+
+      if (kmlInputMode === 'file' && uploadedKmlContent) {
+        requestData.kml_content = uploadedKmlContent;
+      }
+
+      // 关联路线：有选择则传 route_id，否则后端自动创建
+      if (values.route_id) {
+        requestData.route_id = values.route_id;
+      }
 
       if (values.region_name) {
         requestData.region_name = values.region_name;
@@ -130,12 +340,16 @@ const AgentService = () => {
       }
 
       const response = await agentServiceApi.submitAnalysis(requestData);
-      setCurrentTaskId(response.task_id);
-      setTaskStatus(response);
-      setTaskResult(null);
-      message.success(`任务已提交，任务ID: ${response.task_id}`);
-      
-      startPolling(response.task_id);
+      const taskId = response.task_id;
+
+      setCurrentTaskId(taskId);
+      setCurrentRouteId(null); // 等待 SSE completed 事件携带 routeId
+
+      const routeHint = values.route_id ? `已绑定路线 ${values.route_id}` : '将自动创建新路线';
+      message.success(`任务已提交（${routeHint}），任务ID: ${taskId}`);
+
+      // 4.1: 提交成功后立即建立 SSE 连接
+      connectSse(taskId);
     } catch (error) {
       console.error('提交任务失败:', error);
       message.error('提交分析任务失败');
@@ -144,352 +358,27 @@ const AgentService = () => {
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
+  const getProgressStatus = () => {
+    if (!taskProgress) return 'active';
+    if (taskProgress.status === 'completed') return 'success';
+    if (taskProgress.status === 'failed') return 'exception';
+    return 'active';
+  };
+
+  const getStatusTag = () => {
+    if (!taskProgress) return null;
+    switch (taskProgress.status) {
       case 'pending':
-        return 'default';
+        return <Tag color="default">等待中</Tag>;
       case 'processing':
-        return 'processing';
+        return <Tag color="processing">分析中</Tag>;
       case 'completed':
-        return 'success';
+        return <Tag color="success" icon={<CheckCircleOutlined />}>已完成</Tag>;
       case 'failed':
-        return 'error';
+        return <Tag color="error" icon={<CloseCircleOutlined />}>失败</Tag>;
       default:
-        return 'default';
+        return <Tag color="default">{taskProgress.status}</Tag>;
     }
-  };
-
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'pending':
-        return '等待中';
-      case 'processing':
-        return '处理中';
-      case 'completed':
-        return '已完成';
-      case 'failed':
-        return '失败';
-      default:
-        return '未知';
-    }
-  };
-
-  const renderResultSummary = () => {
-    if (!taskResult) return null;
-
-    return (
-      <Card title="分析结果概览" style={{ marginBottom: 24 }}>
-        <Row gutter={[16, 16]}>
-          <Col xs={12} sm={8} lg={4}>
-            <Statistic
-              title="总距离"
-              value={taskResult.total_distance_km}
-              suffix="公里"
-              prefix={<ApiOutlined style={{ color: '#4facfe' }} />}
-            />
-          </Col>
-          <Col xs={12} sm={8} lg={4}>
-            <Statistic
-              title="总爬升"
-              value={taskResult.total_elevation_gain_m}
-              suffix="米"
-              prefix={<ApiOutlined style={{ color: '#43e97b' }} />}
-            />
-          </Col>
-          <Col xs={12} sm={8} lg={4}>
-            <Statistic
-              title="总下降"
-              value={taskResult.total_elevation_loss_m}
-              suffix="米"
-              prefix={<ApiOutlined style={{ color: '#fa709a' }} />}
-            />
-          </Col>
-          <Col xs={12} sm={8} lg={4}>
-            <Statistic
-              title="最高海拔"
-              value={taskResult.max_elevation}
-              suffix="米"
-              prefix={<ApiOutlined style={{ color: '#f093fb' }} />}
-            />
-          </Col>
-          <Col xs={12} sm={8} lg={4}>
-            <Statistic
-              title="最低海拔"
-              value={taskResult.min_elevation}
-              suffix="米"
-              prefix={<ApiOutlined style={{ color: '#feca57' }} />}
-            />
-          </Col>
-          <Col xs={12} sm={8} lg={4}>
-            <Statistic
-              title="预估难度"
-              value={taskResult.estimated_difficulty}
-              suffix="/ 5"
-              prefix={<ApiOutlined style={{ color: '#ff6b6b' }} />}
-            />
-          </Col>
-        </Row>
-
-        {taskResult.is_loop && (
-          <div style={{ marginTop: 16 }}>
-            <Tag color="blue">环线</Tag>
-          </div>
-        )}
-
-        {taskResult.quality_score !== undefined && (
-          <div style={{ marginTop: 16 }}>
-            <Text>质量评分: {taskResult.quality_score.toFixed(1)} / 100</Text>
-          </div>
-        )}
-      </Card>
-    );
-  };
-
-  const renderSegments = () => {
-    if (!taskResult || !taskResult.segments || taskResult.segments.length === 0) {
-      return (
-        <Alert message="暂无路段数据" type="info" showIcon />
-      );
-    }
-
-    const columns = [
-      {
-        title: '路段名称',
-        dataIndex: 'name',
-        key: 'name',
-      },
-      {
-        title: '距离',
-        dataIndex: 'distance_km',
-        key: 'distance_km',
-        render: (val) => `${val} 公里`,
-      },
-      {
-        title: '爬升',
-        dataIndex: 'elevation_gain_m',
-        key: 'elevation_gain_m',
-        render: (val) => `${val} 米`,
-      },
-      {
-        title: '下降',
-        dataIndex: 'elevation_loss_m',
-        key: 'elevation_loss_m',
-        render: (val) => `${val} 米`,
-      },
-      {
-        title: '预计时间',
-        dataIndex: 'estimated_time_minutes',
-        key: 'estimated_time_minutes',
-        render: (val) => `${val} 分钟`,
-      },
-      {
-        title: '难度',
-        dataIndex: 'difficulty',
-        key: 'difficulty',
-        render: (val) => (
-          <Tag color={val <= 2 ? 'green' : val <= 3 ? 'orange' : 'red'}>
-            {val} 级
-          </Tag>
-        ),
-      },
-    ];
-
-    return (
-      <Table
-        columns={columns}
-        dataSource={taskResult.segments}
-        rowKey={(record, index) => `segment-${index}`}
-        pagination={false}
-      />
-    );
-  };
-
-  const renderPOIs = () => {
-    if (!taskResult) {
-      return <Alert message="暂无POI数据" type="info" showIcon />;
-    }
-
-    const { water_sources, campsites, supplies, marker_points } = taskResult;
-
-    return (
-      <Tabs defaultActiveKey="water">
-        <TabPane tab={`水源 (${water_sources?.length || 0})`} key="water">
-          {water_sources && water_sources.length > 0 ? (
-            <Table
-              dataSource={water_sources}
-              rowKey={(record, index) => `water-${index}`}
-              columns={[
-                { title: '名称', dataIndex: 'name', key: 'name' },
-                { title: '类型', dataIndex: 'source_type', key: 'source_type' },
-                { title: '可靠性', dataIndex: 'reliability', key: 'reliability', render: (val) => `${(val * 100).toFixed(0)}%` },
-                { title: '纬度', dataIndex: 'latitude', key: 'latitude' },
-                { title: '经度', dataIndex: 'longitude', key: 'longitude' },
-              ]}
-              pagination={false}
-            />
-          ) : (
-            <Alert message="暂无水源数据" type="info" showIcon />
-          )}
-        </TabPane>
-        
-        <TabPane tab={`营地 (${campsites?.length || 0})`} key="campsite">
-          {campsites && campsites.length > 0 ? (
-            <Table
-              dataSource={campsites}
-              rowKey={(record, index) => `campsite-${index}`}
-              columns={[
-                { title: '名称', dataIndex: 'name', key: 'name' },
-                { title: '容量', dataIndex: 'capacity', key: 'capacity' },
-                { title: '有水源', dataIndex: 'has_water', key: 'has_water', render: (val) => val ? '是' : '否' },
-                { title: '有设施', dataIndex: 'has_facilities', key: 'has_facilities', render: (val) => val ? '是' : '否' },
-                { title: '纬度', dataIndex: 'latitude', key: 'latitude' },
-                { title: '经度', dataIndex: 'longitude', key: 'longitude' },
-              ]}
-              pagination={false}
-            />
-          ) : (
-            <Alert message="暂无营地数据" type="info" showIcon />
-          )}
-        </TabPane>
-        
-        <TabPane tab={`补给点 (${supplies?.length || 0})`} key="supply">
-          {supplies && supplies.length > 0 ? (
-            <Table
-              dataSource={supplies}
-              rowKey={(record, index) => `supply-${index}`}
-              columns={[
-                { title: '名称', dataIndex: 'name', key: 'name' },
-                { title: '类型', dataIndex: 'supply_type', key: 'supply_type' },
-                { title: '纬度', dataIndex: 'latitude', key: 'latitude' },
-                { title: '经度', dataIndex: 'longitude', key: 'longitude' },
-              ]}
-              pagination={false}
-            />
-          ) : (
-            <Alert message="暂无补给点数据" type="info" showIcon />
-          )}
-        </TabPane>
-        
-        <TabPane tab={`标记点 (${marker_points?.length || 0})`} key="marker">
-          {marker_points && marker_points.length > 0 ? (
-            <Table
-              dataSource={marker_points}
-              rowKey={(record, index) => `marker-${index}`}
-              columns={[
-                { title: '名称', dataIndex: 'name', key: 'name' },
-                { title: '类型', dataIndex: 'type', key: 'type' },
-                { title: '海拔', dataIndex: 'elevation', key: 'elevation', render: (val) => val ? `${val} 米` : '-' },
-                { title: '纬度', dataIndex: 'latitude', key: 'latitude' },
-                { title: '经度', dataIndex: 'longitude', key: 'longitude' },
-              ]}
-              pagination={false}
-            />
-          ) : (
-            <Alert message="暂无标记点数据" type="info" showIcon />
-          )}
-        </TabPane>
-      </Tabs>
-    );
-  };
-
-  const renderGeneratedContent = () => {
-    if (!taskResult) {
-      return <Alert message="暂无生成内容" type="info" showIcon />;
-    }
-
-    const {
-      generated_description,
-      generated_highlights,
-      generated_difficulties,
-      generated_safety_notes,
-      equipment_recommendations,
-    } = taskResult;
-
-    return (
-      <Space direction="vertical" style={{ width: '100%' }} size="large">
-        {generated_description && (
-          <Card title="路线描述">
-            <p>{generated_description}</p>
-          </Card>
-        )}
-        
-        {generated_highlights && generated_highlights.length > 0 && (
-          <Card title="路线亮点">
-            <ul>
-              {generated_highlights.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          </Card>
-        )}
-        
-        {generated_difficulties && generated_difficulties.length > 0 && (
-          <Card title="难点提示">
-            <ul>
-              {generated_difficulties.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          </Card>
-        )}
-        
-        {generated_safety_notes && generated_safety_notes.length > 0 && (
-          <Card title="安全提示">
-            <ul>
-              {generated_safety_notes.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          </Card>
-        )}
-        
-        {equipment_recommendations && equipment_recommendations.length > 0 && (
-          <Card title="装备推荐">
-            <ul>
-              {equipment_recommendations.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          </Card>
-        )}
-        
-        {!generated_description && 
-         (!generated_highlights || generated_highlights.length === 0) && 
-         (!generated_difficulties || generated_difficulties.length === 0) && 
-         (!generated_safety_notes || generated_safety_notes.length === 0) && 
-         (!equipment_recommendations || equipment_recommendations.length === 0) && (
-          <Alert message="暂无生成的内容" type="info" showIcon />
-        )}
-      </Space>
-    );
-  };
-
-  const renderWarnings = () => {
-    if (!taskResult || !taskResult.warnings || taskResult.warnings.length === 0) {
-      return <Alert message="暂无警告信息" type="info" showIcon />;
-    }
-
-    return (
-      <Table
-        dataSource={taskResult.warnings}
-        rowKey={(record, index) => `warning-${index}`}
-        columns={[
-          {
-            title: '级别',
-            dataIndex: 'level',
-            key: 'level',
-            render: (val) => (
-              <Tag color={val === 'error' ? 'red' : val === 'warning' ? 'orange' : 'blue'}>
-                {val}
-              </Tag>
-            ),
-          },
-          { title: '消息', dataIndex: 'message', key: 'message' },
-          { title: '详细信息', dataIndex: 'detail', key: 'detail' },
-        ]}
-        pagination={false}
-      />
-    );
   };
 
   return (
@@ -506,6 +395,7 @@ const AgentService = () => {
         </Button>
       </div>
 
+      {/* 服务状态卡片 */}
       <Card style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <CloudServerOutlined style={{ fontSize: 32, color: healthStatus ? '#52c41a' : '#ff4d4f' }} />
@@ -513,11 +403,11 @@ const AgentService = () => {
             <div style={{ fontSize: 16, fontWeight: 600 }}>
               Agent 服务状态:
               {healthStatus ? (
-                <Tag color="success" icon={<CheckCircleOutlined />}>
+                <Tag color="success" icon={<CheckCircleOutlined />} style={{ marginLeft: 8 }}>
                   在线
                 </Tag>
               ) : (
-                <Tag color="error" icon={<CloseCircleOutlined />}>
+                <Tag color="error" icon={<CloseCircleOutlined />} style={{ marginLeft: 8 }}>
                   离线
                 </Tag>
               )}
@@ -531,181 +421,252 @@ const AgentService = () => {
         </div>
       </Card>
 
-      <Tabs activeKey={activeTab} onChange={setActiveTab}>
-        <TabPane tab="提交分析任务" key="submit" icon={<PlayCircleOutlined />}>
-          <Card title="KML 分析任务配置">
-            <Form
-              form={form}
-              layout="vertical"
-              onFinish={handleSubmit}
-              initialValues={{
-                enable_content_generation: true,
-                enable_poi_query: true,
-                poi_search_radius: 500,
+      {/* 任务进度卡片（提交任务后显示） */}
+      {currentTaskId && (
+        <Card
+          title={
+            <Space>
+              <span>分析进度</span>
+              {sseConnected && (
+                <Tag color="green" icon={<WifiOutlined />}>SSE 实时连接</Tag>
+              )}
+              {sseDisconnected && (
+                <Tag color="warning">连接已断开</Tag>
+              )}
+            </Space>
+          }
+          style={{ marginBottom: 24 }}
+        >
+          <div style={{ marginBottom: 12 }}>
+            <Space>
+              <span style={{ color: '#666' }}>任务 ID:</span>
+              <Text code>{currentTaskId}</Text>
+              {getStatusTag()}
+            </Space>
+          </div>
+
+          {/* 进度条（4.7） */}
+          <Progress
+            percent={animatedProgress}
+            status={getProgressStatus()}
+            strokeColor={taskProgress?.status === 'processing' ? { from: '#108ee9', to: '#87d068' } : undefined}
+            style={{ marginBottom: 12 }}
+          />
+
+          {/* 当前步骤 */}
+          {taskProgress?.currentStep && (
+            <div style={{ color: '#666', fontSize: 13, marginBottom: 12 }}>
+              {taskProgress.currentStep}
+            </div>
+          )}
+
+          {/* SSE 连接断开降级提示（4.5） */}
+          {sseDisconnected && taskProgress?.status !== 'completed' && taskProgress?.status !== 'failed' && (
+            <Alert
+              type="warning"
+              showIcon
+              message="SSE 连接已断开"
+              description={
+                <Space>
+                  <span>实时进度推送已中断，可手动刷新查看最新状态。</span>
+                  <Button size="small" onClick={handleManualRefresh}>手动刷新状态</Button>
+                </Space>
+              }
+              style={{ marginBottom: 12 }}
+            />
+          )}
+
+          {/* 失败提示（4.4） */}
+          {taskProgress?.status === 'failed' && (
+            <Alert
+              type="error"
+              showIcon
+              message="分析任务失败"
+              description={taskProgress.error || '未知错误'}
+              style={{ marginBottom: 12 }}
+            />
+          )}
+
+          {/* 完成提示 + 查看路线按钮（4.3） */}
+          {taskProgress?.status === 'completed' && (
+            <Alert
+              type="success"
+              showIcon
+              message="✅ 分析完成，数据已写入路线"
+              description={
+                <Space>
+                  <Text>路线数据已更新，可前往路线管理页查看分析结果。</Text>
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<EyeOutlined />}
+                    onClick={() => navigate('/routes' + (currentRouteId ? `?highlight=${currentRouteId}` : ''))}
+                  >
+                    查看路线
+                  </Button>
+                </Space>
+              }
+            />
+          )}
+        </Card>
+      )}
+
+      {/* 提交任务表单 */}
+      <Card title="KML 分析任务配置">
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleSubmit}
+          initialValues={{
+            enable_content_generation: true,
+            enable_poi_query: true,
+            poi_search_radius: 500,
+          }}
+        >
+          {/* KML 输入模式切换 */}
+          <Form.Item label="KML 来源">
+            <Radio.Group
+              value={kmlInputMode}
+              onChange={(e) => {
+                setKmlInputMode(e.target.value);
+                setUploadedKmlContent(null);
+                setUploadedFileName(null);
               }}
+              style={{ marginBottom: 12 }}
             >
+              <Radio.Button value="url"><LinkOutlined /> URL</Radio.Button>
+              <Radio.Button value="file"><UploadOutlined /> 上传文件</Radio.Button>
+            </Radio.Group>
+
+            {kmlInputMode === 'url' ? (
               <Form.Item
                 name="kml_source"
-                label="KML 文件 URL"
-                rules={[{ required: true, message: '请输入 KML 文件 URL' }]}
-                extra="例如: http://walkbg:8080/static/kml/wutaishan.kml"
+                noStyle
+                rules={kmlInputMode === 'url' ? [{ required: true, message: '请输入 KML 文件 URL' }] : []}
               >
-                <Input placeholder="请输入 KML 文件的 URL 地址" />
+                <Input placeholder="例如: http://walkbg:8080/static/kml/wutaishan.kml" />
               </Form.Item>
-
-              <Row gutter={16}>
-                <Col xs={24} md={12}>
-                  <Form.Item
-                    name="region_name"
-                    label="区域名称（可选）"
-                    extra="提供区域名称可以提高分析质量"
-                  >
-                    <Input placeholder="例如: 五台山" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Form.Item
-                    name="estimated_difficulty"
-                    label="预估难度（可选）"
-                  >
-                    <Select placeholder="请选择预估难度" allowClear>
-                      <Option value={1}>1 - 简单</Option>
-                      <Option value={2}>2 - 较易</Option>
-                      <Option value={3}>3 - 中等</Option>
-                      <Option value={4}>4 - 较难</Option>
-                      <Option value={5}>5 - 困难</Option>
-                    </Select>
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Row gutter={16}>
-                <Col xs={24} md={12}>
-                  <Form.Item
-                    name="enable_content_generation"
-                    label="启用内容生成"
-                    valuePropName="checked"
-                    extra="使用 LLM 生成路线描述、亮点等内容"
-                  >
-                    <Switch />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Form.Item
-                    name="enable_poi_query"
-                    label="启用 POI 查询"
-                    valuePropName="checked"
-                    extra="查询路线附近的水源、营地等 POI"
-                  >
-                    <Switch />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Form.Item
-                name="poi_search_radius"
-                label="POI 搜索半径（米）"
-                extra="POI 查询的搜索范围"
-              >
-                <InputNumber min={100} max={2000} step={100} style={{ width: 200 }} />
-              </Form.Item>
-
-              <Form.Item
-                name="user_notes"
-                label="用户备注（可选）"
-              >
-                <TextArea rows={3} placeholder="输入关于此路线的额外说明..." />
-              </Form.Item>
-
-              <Form.Item>
-                <Button
-                  type="primary"
-                  size="large"
-                  htmlType="submit"
-                  icon={<PlayCircleOutlined />}
-                  loading={submitLoading}
-                  disabled={!healthStatus}
+            ) : (
+              <div>
+                <Upload
+                  accept=".kml,.xml"
+                  beforeUpload={handleFileUpload}
+                  showUploadList={false}
+                  maxCount={1}
                 >
-                  提交分析任务
-                </Button>
-              </Form.Item>
-            </Form>
-          </Card>
-        </TabPane>
-
-        {taskStatus && (
-          <TabPane tab="任务状态" key="status" icon={<ApiOutlined />}>
-            <Card title="任务状态">
-              <Descriptions bordered column={1}>
-                <Descriptions.Item label="任务 ID">
-                  {currentTaskId}
-                </Descriptions.Item>
-                <Descriptions.Item label="状态">
-                  <Tag color={getStatusColor(taskStatus.status)}>
-                    {getStatusText(taskStatus.status)}
-                  </Tag>
-                  {isPolling && <Spin size="small" style={{ marginLeft: 8 }} />}
-                </Descriptions.Item>
-                <Descriptions.Item label="进度">
-                  <Progress percent={taskStatus.progress || 0} status={taskStatus.status === 'failed' ? 'exception' : 'active'} />
-                </Descriptions.Item>
-                <Descriptions.Item label="当前步骤">
-                  {taskStatus.current_step || '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="消息">
-                  {taskStatus.message}
-                </Descriptions.Item>
-                {taskStatus.error && (
-                  <Descriptions.Item label="错误信息">
-                    <Tag color="error">{taskStatus.error}</Tag>
-                  </Descriptions.Item>
+                  <Button icon={<UploadOutlined />}>选择 KML 文件</Button>
+                </Upload>
+                {uploadedFileName && (
+                  <div style={{ marginTop: 8, color: '#52c41a' }}>
+                    <CheckCircleOutlined /> 已选择：{uploadedFileName}
+                    <Button
+                      type="link"
+                      size="small"
+                      danger
+                      onClick={() => { setUploadedKmlContent(null); setUploadedFileName(null); }}
+                      style={{ marginLeft: 8 }}
+                    >
+                      移除
+                    </Button>
+                  </div>
                 )}
-              </Descriptions>
-            </Card>
-          </TabPane>
-        )}
+              </div>
+            )}
+          </Form.Item>
 
-        {taskResult && (
-          <TabPane tab="分析结果" key="result" icon={<FileTextOutlined />}>
-            {renderResultSummary()}
-            
-            <Tabs defaultActiveKey="segments">
-              <TabPane tab="路段详情" key="segments" icon={<ApiOutlined />}>
-                <Card>{renderSegments()}</Card>
-              </TabPane>
-              
-              <TabPane tab="POI 数据" key="pois" icon={<SafetyCertificateOutlined />}>
-                <Card>{renderPOIs()}</Card>
-              </TabPane>
-              
-              <TabPane tab="生成内容" key="generated" icon={<FileTextOutlined />}>
-                <Card>{renderGeneratedContent()}</Card>
-              </TabPane>
-              
-              <TabPane tab="装备推荐" key="equipment" icon={<ShoppingOutlined />}>
-                <Card>
-                  {taskResult.equipment_recommendations && taskResult.equipment_recommendations.length > 0 ? (
-                    <div>
-                      <h4 style={{ marginBottom: 16 }}>推荐装备列表</h4>
-                      <ul>
-                        {taskResult.equipment_recommendations.map((item, index) => (
-                          <li key={index} style={{ marginBottom: 8 }}>{item}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : (
-                    <Alert message="暂无装备推荐" type="info" showIcon />
-                  )}
-                </Card>
-              </TabPane>
-              
-              <TabPane tab="警告信息" key="warnings" icon={<WarningOutlined />}>
-                <Card>{renderWarnings()}</Card>
-              </TabPane>
-            </Tabs>
-          </TabPane>
-        )}
-      </Tabs>
+          {/* 关联路线选择 */}
+          <Form.Item
+            name="route_id"
+            label="关联路线（可选）"
+            extra="选择已有路线，分析结果将更新该路线数据；不选则自动创建新路线"
+          >
+            <Select
+              showSearch
+              placeholder="搜索路线名称，或不选以自动创建新路线"
+              filterOption={false}
+              onSearch={handleRouteSearch}
+              loading={routeSearchLoading}
+              allowClear
+              notFoundContent={routeSearchLoading ? <span>搜索中...</span> : '未找到匹配路线'}
+            >
+              {routeOptions.map((opt) => (
+                <Option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Divider />
+
+          <Form.Item
+            name="region_name"
+            label="区域名称（可选）"
+            extra="自动创建新路线时用作路线名称，提供区域名称可提高分析质量"
+          >
+            <Input placeholder="例如: 五台山" />
+          </Form.Item>
+
+          <Form.Item
+            name="estimated_difficulty"
+            label="预估难度（可选）"
+          >
+            <Select placeholder="请选择预估难度" allowClear style={{ width: 200 }}>
+              <Option value={1}>1 - 简单</Option>
+              <Option value={2}>2 - 较易</Option>
+              <Option value={3}>3 - 中等</Option>
+              <Option value={4}>4 - 较难</Option>
+              <Option value={5}>5 - 困难</Option>
+            </Select>
+          </Form.Item>
+
+          <Space size="large">
+            <Form.Item
+              name="enable_content_generation"
+              label="启用内容生成"
+              valuePropName="checked"
+              extra="使用 LLM 生成路线描述、亮点等"
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item
+              name="enable_poi_query"
+              label="启用 POI 查询"
+              valuePropName="checked"
+              extra="查询路线附近水源、营地等"
+            >
+              <Switch />
+            </Form.Item>
+          </Space>
+
+          <Form.Item
+            name="poi_search_radius"
+            label="POI 搜索半径（米）"
+          >
+            <InputNumber min={100} max={2000} step={100} style={{ width: 200 }} />
+          </Form.Item>
+
+          <Form.Item
+            name="user_notes"
+            label="用户备注（可选）"
+          >
+            <Input.TextArea rows={3} placeholder="输入关于此路线的额外说明..." />
+          </Form.Item>
+
+          <Form.Item>
+            <Button
+              type="primary"
+              size="large"
+              htmlType="submit"
+              icon={<PlayCircleOutlined />}
+              loading={submitLoading}
+              disabled={!healthStatus}
+            >
+              提交分析任务
+            </Button>
+          </Form.Item>
+        </Form>
+      </Card>
     </div>
   );
 };

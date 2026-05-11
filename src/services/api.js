@@ -13,7 +13,7 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('walk_admin_token');
-    if (token && !token.startsWith('mock_')) {
+    if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
@@ -29,12 +29,9 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      const token = localStorage.getItem('walk_admin_token');
-      if (!token || !token.startsWith('mock_')) {
-        localStorage.removeItem('walk_admin_token');
-        localStorage.removeItem('walk_admin_user');
-        window.location.href = '/login';
-      }
+      localStorage.removeItem('walk_admin_token');
+      localStorage.removeItem('walk_admin_user');
+      window.location.href = '/login';
     }
     return Promise.reject(error);
   }
@@ -89,12 +86,23 @@ export const getGuideStatusColor = (status) => {
 export const extractApiData = (response) => {
   if (!response) return null;
   const data = response.data;
-  if (data && data.code === 0 && data.data) {
+  if (!data) return null;
+  
+  // 后端标准响应格式: { success: true, data: {...}, message: "..." }
+  if (data.success === true && data.data !== undefined) {
     return data.data;
   }
-  if (data && data.content !== undefined) {
+  
+  // 兼容 code 格式: { code: 0, data: {...} }
+  if (data.code === 0 && data.data) {
+    return data.data;
+  }
+  
+  // 直接返回分页数据 { content: [...], totalElements: ... }
+  if (data.content !== undefined) {
     return data;
   }
+  
   return data;
 };
 
@@ -111,27 +119,17 @@ export const authApi = {
 
 export const userApi = {
   getUsers: async (page = 0, size = 10, keyword = null, status = null) => {
-    try {
-      const params = { page, size };
-      if (keyword) params.keyword = keyword;
-      if (status !== null) params.status = status;
-      
-      const response = await api.get('/api/v1/users', { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取用户列表失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    if (keyword) params.keyword = keyword;
+    if (status !== null) params.status = status;
+    
+    const response = await api.get('/api/v1/users', { params });
+    return extractApiData(response);
   },
   
   getUserById: async (id) => {
-    try {
-      const response = await api.get(`/api/v1/users/${id}`);
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取用户详情失败:', error);
-      return null;
-    }
+    const response = await api.get(`/api/v1/users/${id}`);
+    return extractApiData(response);
   },
   
   deleteUser: async (id) => {
@@ -147,98 +145,58 @@ export const userApi = {
 
 export const routeApi = {
   getRoutes: async (page = 0, size = 10, keyword = null, difficulty = null) => {
-    try {
-      const params = { page, size };
-      if (keyword) params.keyword = keyword;
-      if (difficulty !== null) params.difficulty = difficulty;
-      
-      const response = await api.get('/api/v1/routes', { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取路线列表失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    if (keyword) params.keyword = keyword;
+    if (difficulty !== null) params.difficulty = difficulty;
+    
+    const response = await api.get('/api/v1/routes', { params });
+    return extractApiData(response);
   },
   
   getRouteById: async (id) => {
-    try {
-      const response = await api.get(`/api/v1/routes/${id}`);
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取路线详情失败:', error);
-      return null;
-    }
+    const response = await api.get(`/api/v1/routes/${id}`);
+    return extractApiData(response);
   },
   
   getPopularRoutes: async (limit = 10) => {
-    try {
-      const response = await api.get('/api/v1/routes/popular', { params: { limit } });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取热门路线失败:', error);
-      return null;
-    }
+    const response = await api.get('/api/v1/routes/popular', { params: { limit } });
+    return extractApiData(response);
   },
 };
 
 export const tripApi = {
   getTrips: async (page = 0, size = 10, keyword = null, status = null) => {
-    try {
-      const params = { page, size };
-      if (keyword) params.keyword = keyword;
-      if (status !== null) params.status = status;
-      
-      const response = await api.get('/api/v1/trips', { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取行程列表失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    if (keyword) params.keyword = keyword;
+    if (status !== null) params.status = status;
+    
+    const response = await api.get('/api/v1/trips', { params });
+    return extractApiData(response);
   },
   
   getTripById: async (id) => {
-    try {
-      const response = await api.get(`/api/v1/trips/${id}`);
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取行程详情失败:', error);
-      return null;
-    }
+    const response = await api.get(`/api/v1/trips/${id}`);
+    return extractApiData(response);
   },
   
   getTripStatistics: async () => {
-    try {
-      const response = await api.get('/api/v1/trips/statistics');
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取行程统计失败:', error);
-      return null;
-    }
+    const response = await api.get('/api/v1/trips/statistics');
+    return extractApiData(response);
   },
 };
 
 export const guideApi = {
   getGuides: async (page = 0, size = 10, tag = null) => {
-    try {
-      const params = { page, size };
-      if (tag) params.tag = tag;
-      
-      const response = await api.get('/api/v1/guides', { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取攻略列表失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    if (tag) params.tag = tag;
+    
+    const response = await api.get('/api/v1/guides', { params });
+    return extractApiData(response);
   },
   
   getGuideById: async (id) => {
-    try {
-      const response = await api.get(`/api/v1/guides/${id}`);
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取攻略详情失败:', error);
-      return null;
-    }
+    const response = await api.get(`/api/v1/guides/${id}`);
+    return extractApiData(response);
   },
 };
 
@@ -276,27 +234,17 @@ export const getEquipmentListStatusColor = (status) => {
 
 export const equipmentItemApi = {
   getEquipmentItems: async (page = 0, size = 10, keyword = null, category = null) => {
-    try {
-      const params = { page, size };
-      if (keyword) params.keyword = keyword;
-      if (category !== null) params.category = category;
-      
-      const response = await api.get('/api/v1/equipment/items', { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取装备列表失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    if (keyword) params.keyword = keyword;
+    if (category !== null) params.category = category;
+    
+    const response = await api.get('/api/v1/equipment/items', { params });
+    return extractApiData(response);
   },
   
   getEquipmentItemById: async (id) => {
-    try {
-      const response = await api.get(`/api/v1/equipment/items/${id}`);
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取装备详情失败:', error);
-      return null;
-    }
+    const response = await api.get(`/api/v1/equipment/items/${id}`);
+    return extractApiData(response);
   },
   
   createEquipmentItem: async (data) => {
@@ -330,39 +278,24 @@ export const equipmentItemApi = {
   },
   
   getCategoryStats: async () => {
-    try {
-      const response = await api.get('/api/v1/equipment/category-stats');
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取分类统计失败:', error);
-      return null;
-    }
+    const response = await api.get('/api/v1/equipment/category-stats');
+    return extractApiData(response);
   },
 };
 
 export const equipmentListApi = {
   getEquipmentLists: async (page = 0, size = 10, type = null, status = null) => {
-    try {
-      const params = { page, size };
-      if (type !== null) params.type = type;
-      if (status !== null) params.status = status;
-      
-      const response = await api.get('/api/v1/equipment-lists', { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取装备清单列表失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    if (type !== null) params.type = type;
+    if (status !== null) params.status = status;
+    
+    const response = await api.get('/api/v1/equipment-lists', { params });
+    return extractApiData(response);
   },
   
   getEquipmentListById: async (id) => {
-    try {
-      const response = await api.get(`/api/v1/equipment-lists/${id}`);
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取装备清单详情失败:', error);
-      return null;
-    }
+    const response = await api.get(`/api/v1/equipment-lists/${id}`);
+    return extractApiData(response);
   },
   
   createEquipmentList: async (data) => {
@@ -396,14 +329,9 @@ export const equipmentListApi = {
   },
   
   getListItems: async (listId, page = 0, size = 20) => {
-    try {
-      const params = { page, size };
-      const response = await api.get(`/api/v1/equipment-lists/${listId}/items`, { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取清单装备列表失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    const response = await api.get(`/api/v1/equipment-lists/${listId}/items`, { params });
+    return extractApiData(response);
   },
   
   addItemToList: async (listId, data) => {
@@ -427,13 +355,8 @@ export const equipmentListApi = {
   },
   
   getWeightStats: async (listId) => {
-    try {
-      const response = await api.get(`/api/v1/equipment-lists/${listId}/weight-stats`);
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取清单重量统计失败:', error);
-      return null;
-    }
+    const response = await api.get(`/api/v1/equipment-lists/${listId}/weight-stats`);
+    return extractApiData(response);
   },
   
   updateListStatus: async (listId, status) => {
@@ -449,29 +372,19 @@ export const equipmentListApi = {
 
 export const equipmentTemplateApi = {
   getTemplates: async (page = 0, size = 10, keyword = null, category = null, type = null, isOfficial = null) => {
-    try {
-      const params = { page, size };
-      if (keyword) params.keyword = keyword;
-      if (category !== null) params.category = category;
-      if (type !== null) params.type = type;
-      if (isOfficial !== null) params.isOfficial = isOfficial;
-      
-      const response = await api.get('/api/v1/equipment-templates', { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取装备模板列表失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    if (keyword) params.keyword = keyword;
+    if (category !== null) params.category = category;
+    if (type !== null) params.type = type;
+    if (isOfficial !== null) params.isOfficial = isOfficial;
+    
+    const response = await api.get('/api/v1/equipment-templates', { params });
+    return extractApiData(response);
   },
   
   getTemplateById: async (id) => {
-    try {
-      const response = await api.get(`/api/v1/equipment-templates/${id}`);
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取装备模板详情失败:', error);
-      return null;
-    }
+    const response = await api.get(`/api/v1/equipment-templates/${id}`);
+    return extractApiData(response);
   },
   
   createTemplate: async (data) => {
@@ -485,132 +398,12 @@ export const equipmentTemplateApi = {
   },
   
   getOfficialTemplates: async (page = 0, size = 10) => {
-    try {
-      const params = { page, size };
-      const response = await api.get('/api/v1/equipment-templates/official', { params });
-      return extractApiData(response);
-    } catch (error) {
-      console.error('获取官方模板失败:', error);
-      return null;
-    }
+    const params = { page, size };
+    const response = await api.get('/api/v1/equipment-templates/official', { params });
+    return extractApiData(response);
   },
 };
 
-export const mockDataGenerator = {
-  generateMockUsers: (count = 10) => {
-    const names = ['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十', '郑十一', '冯十二'];
-    const users = [];
-    
-    for (let i = 0; i < count; i++) {
-      users.push({
-        id: `user_${i + 1}`,
-        username: `user${i + 1}`,
-        nickname: names[i % names.length],
-        email: `user${i + 1}@example.com`,
-        phone: `1380000${String(1000 + i).padStart(4, '0')}`,
-        avatarUrl: null,
-        createdAt: Math.floor(Date.now() / 1000) - i * 86400,
-      });
-    }
-    
-    return {
-      content: users,
-      totalElements: 128,
-      totalPages: 13,
-      number: 0,
-      size: 10,
-    };
-  },
-
-  generateMockRoutes: (count = 10) => {
-    const routeNames = ['五台山徒步路线', '武功山穿越路线', '稻城亚丁徒步', '雨崩徒步路线', '虎跳峡徒步', '贡嘎大环线', '四姑娘山徒步', '鳌太穿越', '洛克线徒步', '夏特古道'];
-    const regions = ['山西', '江西', '四川', '云南', '云南', '四川', '四川', '陕西', '四川', '新疆'];
-    
-    const routes = [];
-    
-    for (let i = 0; i < count; i++) {
-      routes.push({
-        id: `route_${i + 1}`,
-        name: routeNames[i % routeNames.length],
-        description: `这是${routeNames[i % routeNames.length]}的详细描述，包含路线特点、注意事项等信息。`,
-        region: regions[i % regions.length],
-        difficulty: (i % 5) + 1,
-        popularity: Math.floor(Math.random() * 1000),
-        createdAt: Math.floor(Date.now() / 1000) - i * 86400 * 2,
-        createdBy: `user_${(i % 5) + 1}`,
-        coverUrl: null,
-      });
-    }
-    
-    return {
-      content: routes,
-      totalElements: 56,
-      totalPages: 6,
-      number: 0,
-      size: 10,
-    };
-  },
-
-  generateMockTrips: (count = 10) => {
-    const tripNames = ['周末徒步活动', '国庆长假徒步', '春季踏青之旅', '夏季避暑徒步', '秋季赏叶行程', '冬季雪山攀登', '团队建设徒步', '亲子徒步活动', '摄影徒步之旅', '探险徒步行程'];
-    
-    const trips = [];
-    
-    for (let i = 0; i < count; i++) {
-      trips.push({
-        id: `trip_${i + 1}`,
-        name: tripNames[i % tripNames.length],
-        description: `这是${tripNames[i % tripNames.length]}的详细描述。`,
-        status: i % 4,
-        startDate: Math.floor(Date.now() / 1000) + i * 86400,
-        endDate: Math.floor(Date.now() / 1000) + (i + 2) * 86400,
-        organizerId: `user_${(i % 5) + 1}`,
-        budget: (Math.floor(Math.random() * 10000) + 1000).toFixed(2),
-        createdAt: Math.floor(Date.now() / 1000) - i * 86400,
-        updatedAt: Math.floor(Date.now() / 1000) - i * 3600,
-      });
-    }
-    
-    return {
-      content: trips,
-      totalElements: 89,
-      totalPages: 9,
-      number: 0,
-      size: 10,
-    };
-  },
-
-  generateMockGuides: (count = 10) => {
-    const guideTitles = ['新手徒步入门指南', '高海拔徒步注意事项', '徒步装备选择攻略', '户外急救知识大全', '徒步路线规划技巧', '摄影徒步技巧分享', '亲子徒步注意事项', '冬季徒步保暖攻略', '徒步饮食搭配建议', '徒步安全须知'];
-    
-    const guides = [];
-    
-    for (let i = 0; i < count; i++) {
-      guides.push({
-        id: `guide_${i + 1}`,
-        title: guideTitles[i % guideTitles.length],
-        content: `这是${guideTitles[i % guideTitles.length]}的详细内容。`,
-        author: `用户${i + 1}`,
-        authorId: `user_${(i % 5) + 1}`,
-        views: Math.floor(Math.random() * 5000),
-        likes: Math.floor(Math.random() * 500),
-        status: i % 3,
-        difficulty: (i % 5) + 1,
-        tags: ['徒步', '攻略', '入门'],
-        publishDate: Math.floor(Date.now() / 1000) - i * 86400 * 3,
-        updateDate: Math.floor(Date.now() / 1000) - i * 3600,
-      });
-    }
-    
-    return {
-      content: guides,
-      totalElements: 42,
-      totalPages: 5,
-      number: 0,
-      size: 10,
-    };
-  },
-};
 
 const extractApiResponseData = (response) => {
   if (!response) return null;
@@ -670,27 +463,32 @@ export const agentServiceApi = {
     }
   },
 
-  submitAnalysis: async (data) => {
-    try {
-      const requestData = {
-        kml_source: data.kml_source,
-        enable_content_generation: data.enable_content_generation,
-        enable_poi_query: data.enable_poi_query,
-        poi_search_radius: data.poi_search_radius,
-      };
+submitAnalysis: async (data) => {
+try {
+const requestData = {
+kml_source: data.kml_source,
+enable_content_generation: data.enable_content_generation,
+enable_poi_query: data.enable_poi_query,
+poi_search_radius: data.poi_search_radius,
+};
 
-      if (data.route_id) {
-        requestData.route_id = data.route_id;
-      }
-      if (data.region_name) {
-        requestData.region_name = data.region_name;
-      }
-      if (data.estimated_difficulty) {
-        requestData.estimated_difficulty = data.estimated_difficulty;
-      }
-      if (data.user_notes) {
-        requestData.user_notes = data.user_notes;
-      }
+// 文件上传模式：直接传 KML 内容（优先级高于 URL）
+if (data.kml_content) {
+requestData.kml_content = data.kml_content;
+}
+
+if (data.route_id) {
+requestData.route_id = data.route_id;
+}
+if (data.region_name) {
+requestData.region_name = data.region_name;
+}
+if (data.estimated_difficulty) {
+requestData.estimated_difficulty = data.estimated_difficulty;
+}
+if (data.user_notes) {
+requestData.user_notes = data.user_notes;
+}
 
       const response = await api.post('/api/v1/route-analysis/analyze', requestData);
       const result = extractApiResponseData(response);

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin, Popconfirm } from 'antd';
+import { Table, Button, Space, Modal, Descriptions, Input, Select, Tag, message, Spin, Popconfirm } from 'antd';
 import { SearchOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
-import { userApi, mockDataGenerator, formatTimestamp } from '../services/api';
+import { userApi, formatTimestamp } from '../services/api';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -16,7 +16,6 @@ const Users = () => {
   const [selectedStatus, setSelectedStatus] = useState(undefined);
   const [selectedUser, setSelectedUser] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [useMockData, setUseMockData] = useState(false);
 
   useEffect(() => {
     loadUsers();
@@ -25,35 +24,28 @@ const Users = () => {
   const loadUsers = async () => {
     setLoading(true);
     try {
-      const response = await userApi.getUsers(currentPage - 1, pageSize, searchText, selectedStatus);
+      // 将 selectedStatus 转为数字（后端接收 Int）
+      const statusParam = selectedStatus !== undefined ? Number(selectedStatus) : null;
+      const response = await userApi.getUsers(currentPage - 1, pageSize, searchText || null, statusParam);
       
-      if (response && response.content && response.content.length > 0) {
+      if (response && response.content) {
         setData(response.content);
         setTotal(response.totalElements || 0);
-        setUseMockData(false);
       } else {
-        const mockData = mockDataGenerator.generateMockUsers(pageSize);
-        setData(mockData.content);
-        setTotal(mockData.totalElements);
-        setUseMockData(true);
+        setData([]);
+        setTotal(0);
       }
     } catch (error) {
       console.error('加载用户列表失败:', error);
-      const mockData = mockDataGenerator.generateMockUsers(pageSize);
-      setData(mockData.content);
-      setTotal(mockData.totalElements);
-      setUseMockData(true);
+      message.error('加载用户列表失败');
+      setData([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (id) => {
-    if (useMockData) {
-      message.warning('演示模式下无法删除数据');
-      return;
-    }
-    
     try {
       await userApi.deleteUser(id);
       message.success('删除成功');
@@ -69,12 +61,19 @@ const Users = () => {
     setDetailModalVisible(true);
   };
 
+  const getUserStatusTag = (status) => {
+    if (status === 0) return <Tag color="success">正常</Tag>;
+    if (status === 1) return <Tag color="error">禁用</Tag>;
+    return <Tag>未知</Tag>;
+  };
+
   const columns = [
     {
       title: 'ID',
       dataIndex: 'id',
       key: 'id',
       width: 120,
+      ellipsis: true,
     },
     {
       title: '用户名',
@@ -99,9 +98,15 @@ const Users = () => {
       render: (text) => text || '-',
     },
     {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status) => getUserStatusTag(status),
+    },
+    {
       title: '注册时间',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
+      dataIndex: 'created_at',
+      key: 'created_at',
       render: (timestamp) => formatTimestamp(timestamp),
     },
     {
@@ -142,7 +147,6 @@ const Users = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>用户管理</h2>
-        {useMockData && <Tag color="orange">演示模式</Tag>}
       </div>
       
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
@@ -154,7 +158,7 @@ const Users = () => {
             style={{ width: 250 }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            onSearch={(value) => {
+            onSearch={() => {
               setCurrentPage(1);
               loadUsers();
             }}
@@ -167,7 +171,8 @@ const Users = () => {
             onChange={(value) => {
               setSelectedStatus(value);
               setCurrentPage(1);
-              loadUsers();
+              // 状态变化后立即重新加载，使用最新状态值
+              setTimeout(() => loadUsers(), 0);
             }}
           >
             <Option value="0">正常</Option>
@@ -217,7 +222,12 @@ const Users = () => {
             <Descriptions.Item label="昵称">{selectedUser.nickname || '-'}</Descriptions.Item>
             <Descriptions.Item label="邮箱">{selectedUser.email || '-'}</Descriptions.Item>
             <Descriptions.Item label="手机号">{selectedUser.phone || '-'}</Descriptions.Item>
-            <Descriptions.Item label="注册时间">{formatTimestamp(selectedUser.createdAt)}</Descriptions.Item>
+            <Descriptions.Item label="个人简介">{selectedUser.bio || '-'}</Descriptions.Item>
+            <Descriptions.Item label="账号状态">{getUserStatusTag(selectedUser.status)}</Descriptions.Item>
+            <Descriptions.Item label="最近登录">
+              {selectedUser.last_login_at ? formatTimestamp(selectedUser.last_login_at) : '从未登录'}
+            </Descriptions.Item>
+            <Descriptions.Item label="注册时间">{formatTimestamp(selectedUser.created_at)}</Descriptions.Item>
           </Descriptions>
         )}
       </Modal>

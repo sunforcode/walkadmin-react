@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin } from 'antd';
 import { SearchOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons';
-import { guideApi, mockDataGenerator, formatTimestamp, getGuideStatusText, getGuideStatusColor, getDifficultyText } from '../services/api';
+import { guideApi, formatTimestamp, getGuideStatusText, getGuideStatusColor, getDifficultyText } from '../services/api';
 
 const { Search } = Input;
 const { Option } = Select;
@@ -16,7 +16,6 @@ const Guides = () => {
   const [selectedStatus, setSelectedStatus] = useState(undefined);
   const [selectedGuide, setSelectedGuide] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [useMockData, setUseMockData] = useState(false);
 
   useEffect(() => {
     loadGuides();
@@ -27,22 +26,18 @@ const Guides = () => {
     try {
       const response = await guideApi.getGuides(currentPage - 1, pageSize);
       
-      if (response && response.content && response.content.length > 0) {
+      if (response && response.content) {
         setData(response.content);
         setTotal(response.totalElements || 0);
-        setUseMockData(false);
       } else {
-        const mockData = mockDataGenerator.generateMockGuides(pageSize);
-        setData(mockData.content);
-        setTotal(mockData.totalElements);
-        setUseMockData(true);
+        setData([]);
+        setTotal(0);
       }
     } catch (error) {
       console.error('加载攻略列表失败:', error);
-      const mockData = mockDataGenerator.generateMockGuides(pageSize);
-      setData(mockData.content);
-      setTotal(mockData.totalElements);
-      setUseMockData(true);
+      message.error('加载攻略列表失败');
+      setData([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -122,7 +117,6 @@ const Guides = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>攻略管理</h2>
-        {useMockData && <Tag color="orange">演示模式</Tag>}
       </div>
       
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
@@ -134,7 +128,7 @@ const Guides = () => {
             style={{ width: 250 }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            onSearch={(value) => {
+            onSearch={() => {
               setCurrentPage(1);
               loadGuides();
             }}
@@ -158,12 +152,6 @@ const Guides = () => {
         <Button icon={<ReloadOutlined />} onClick={loadGuides}>
           刷新
         </Button>
-      </div>
-
-      <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#fff7e6', border: '1px solid #ffd591', borderRadius: 8 }}>
-        <p style={{ margin: 0, color: '#fa8c16' }}>
-          <strong>说明：</strong>攻略状态是内容审核状态（草稿/已发布/已下线），管理员需要管理这些状态来控制内容的可见性。
-        </p>
       </div>
 
       <Spin spinning={loading}>

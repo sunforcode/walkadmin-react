@@ -20,113 +20,12 @@ import {
   getEquipmentTypeText,
   getEquipmentListStatusText,
   getEquipmentListStatusColor,
-  mockDataGenerator,
   formatTimestamp,
 } from '../services/api';
 
 const { Search } = Input;
 const { Option } = Select;
 const { TabPane } = Tabs;
-
-const generateMockEquipmentItems = (count = 10) => {
-  const names = [
-    '登山背包', '帐篷', '睡袋', '防潮垫', '登山杖', '头灯', '水壶',
-    '徒步鞋', '冲锋衣', '速干裤', '帽子', '手套', '墨镜', '防晒霜',
-    '急救包', '刀具', '炉具', '气罐', '餐具', '洗漱用品'
-  ];
-  
-  const items = [];
-  for (let i = 0; i < count; i++) {
-    items.push({
-      id: `item_${i + 1}`,
-      name: names[i % names.length],
-      category: i % 11,
-      categoryName: getEquipmentCategoryText(i % 11),
-      weight: Math.floor(Math.random() * 5000) + 100,
-      weightUnit: 0,
-      weightUnitName: '克',
-      quantity: Math.floor(Math.random() * 3) + 1,
-      createdAt: Math.floor(Date.now() / 1000) - i * 86400,
-      updatedAt: Math.floor(Date.now() / 1000) - i * 3600,
-    });
-  }
-  
-  return {
-    content: items,
-    totalElements: 56,
-    totalPages: 6,
-    number: 0,
-    size: 10,
-  };
-};
-
-const generateMockEquipmentLists = (count = 10) => {
-  const names = [
-    '周末一日徒步装备', '三天两夜露营装备', '冬季雪山攀登装备',
-    '夏季溯溪装备', '秋季摄影徒步装备', '亲子徒步装备',
-    '团队穿越装备', '高海拔徒步装备', '轻量化徒步装备', '重装徒步装备'
-  ];
-  
-  const lists = [];
-  for (let i = 0; i < count; i++) {
-    lists.push({
-      id: `list_${i + 1}`,
-      name: names[i % names.length],
-      type: i % 3,
-      typeName: getEquipmentTypeText(i % 3),
-      personCount: Math.floor(Math.random() * 4) + 1,
-      status: i % 4,
-      statusName: getEquipmentListStatusText(i % 4),
-      totalWeight: Math.floor(Math.random() * 20000) + 1000,
-      itemCount: Math.floor(Math.random() * 15) + 5,
-      createdAt: Math.floor(Date.now() / 1000) - i * 86400,
-      updatedAt: Math.floor(Date.now() / 1000) - i * 3600,
-    });
-  }
-  
-  return {
-    content: lists,
-    totalElements: 32,
-    totalPages: 4,
-    number: 0,
-    size: 10,
-  };
-};
-
-const generateMockTemplates = (count = 10) => {
-  const names = [
-    '标准一日徒步模板', '标准露营模板', '冬季登山模板',
-    '轻量化徒步模板', '重装穿越模板', '团队活动模板',
-    '摄影徒步模板', '亲子活动模板', '高海拔模板', '溯溪活动模板'
-  ];
-  
-  const templates = [];
-  for (let i = 0; i < count; i++) {
-    templates.push({
-      id: `template_${i + 1}`,
-      name: names[i % names.length],
-      category: i % 11,
-      categoryName: getEquipmentCategoryText(i % 11),
-      type: i % 3,
-      typeName: getEquipmentTypeText(i % 3),
-      isOfficial: i < 3,
-      creatorId: `user_${(i % 5) + 1}`,
-      creatorName: `用户${(i % 5) + 1}`,
-      usageCount: Math.floor(Math.random() * 100) + 1,
-      rating: (Math.random() * 2 + 3).toFixed(1),
-      createdAt: Math.floor(Date.now() / 1000) - i * 86400 * 2,
-      updatedAt: Math.floor(Date.now() / 1000) - i * 86400,
-    });
-  }
-  
-  return {
-    content: templates,
-    totalElements: 24,
-    totalPages: 3,
-    number: 0,
-    size: 10,
-  };
-};
 
 const Equipment = () => {
   const [activeTab, setActiveTab] = useState('items');
@@ -142,7 +41,6 @@ const Equipment = () => {
   const [itemDetailModal, setItemDetailModal] = useState(false);
   const [itemEditModal, setItemEditModal] = useState(false);
   const [itemForm] = Form.useForm();
-  const [useItemMockData, setUseItemMockData] = useState(false);
   
   const [listLoading, setListLoading] = useState(false);
   const [listData, setListData] = useState([]);
@@ -153,7 +51,6 @@ const Equipment = () => {
   const [listStatus, setListStatus] = useState(undefined);
   const [selectedList, setSelectedList] = useState(null);
   const [listDetailModal, setListDetailModal] = useState(false);
-  const [useListMockData, setUseListMockData] = useState(false);
   
   const [templateLoading, setTemplateLoading] = useState(false);
   const [templateData, setTemplateData] = useState([]);
@@ -163,7 +60,6 @@ const Equipment = () => {
   const [templateSearchText, setTemplateSearchText] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [templateDetailModal, setTemplateDetailModal] = useState(false);
-  const [useTemplateMockData, setUseTemplateMockData] = useState(false);
   
   const [stats, setStats] = useState({
     totalItems: 0,
@@ -183,13 +79,30 @@ const Equipment = () => {
     loadStats();
   }, [activeTab, itemPage, itemPageSize, listPage, listPageSize, templatePage, templatePageSize]);
 
-  const loadStats = () => {
-    setStats({
-      totalItems: 56,
-      totalLists: 32,
-      totalTemplates: 24,
-      officialTemplates: 8,
-    });
+  const loadStats = async () => {
+    try {
+      const results = await Promise.allSettled([
+        equipmentItemApi.getEquipmentItems(0, 1),
+        equipmentListApi.getEquipmentLists(0, 1),
+        equipmentTemplateApi.getTemplates(0, 1),
+      ]);
+      const [itemsRes, listsRes, templatesRes] = results;
+      
+      const failed = results.filter(r => r.status === 'rejected');
+      if (failed.length > 0) {
+        message.error(`装备统计部分加载失败（${failed.length}/${results.length}）`);
+      }
+      
+      setStats({
+        totalItems: itemsRes.status === 'fulfilled' ? (itemsRes.value?.totalElements || 0) : 0,
+        totalLists: listsRes.status === 'fulfilled' ? (listsRes.value?.totalElements || 0) : 0,
+        totalTemplates: templatesRes.status === 'fulfilled' ? (templatesRes.value?.totalElements || 0) : 0,
+        officialTemplates: 0,
+      });
+    } catch (error) {
+      console.error('加载统计数据失败:', error);
+      message.error('加载装备统计数据失败');
+    }
   };
 
   const loadItems = async () => {
@@ -202,22 +115,18 @@ const Equipment = () => {
         itemCategory
       );
       
-      if (response && response.content && response.content.length > 0) {
+      if (response && response.content) {
         setItemData(response.content);
         setItemTotal(response.totalElements || 0);
-        setUseItemMockData(false);
       } else {
-        const mockData = generateMockEquipmentItems(itemPageSize);
-        setItemData(mockData.content);
-        setItemTotal(mockData.totalElements);
-        setUseItemMockData(true);
+        setItemData([]);
+        setItemTotal(0);
       }
     } catch (error) {
       console.error('加载装备列表失败:', error);
-      const mockData = generateMockEquipmentItems(itemPageSize);
-      setItemData(mockData.content);
-      setItemTotal(mockData.totalElements);
-      setUseItemMockData(true);
+      message.error('加载装备列表失败');
+      setItemData([]);
+      setItemTotal(0);
     } finally {
       setItemLoading(false);
     }
@@ -233,22 +142,18 @@ const Equipment = () => {
         listStatus
       );
       
-      if (response && response.content && response.content.length > 0) {
+      if (response && response.content) {
         setListData(response.content);
         setListTotal(response.totalElements || 0);
-        setUseListMockData(false);
       } else {
-        const mockData = generateMockEquipmentLists(listPageSize);
-        setListData(mockData.content);
-        setListTotal(mockData.totalElements);
-        setUseListMockData(true);
+        setListData([]);
+        setListTotal(0);
       }
     } catch (error) {
       console.error('加载装备清单列表失败:', error);
-      const mockData = generateMockEquipmentLists(listPageSize);
-      setListData(mockData.content);
-      setListTotal(mockData.totalElements);
-      setUseListMockData(true);
+      message.error('加载装备清单列表失败');
+      setListData([]);
+      setListTotal(0);
     } finally {
       setListLoading(false);
     }
@@ -263,33 +168,24 @@ const Equipment = () => {
         templateSearchText || null
       );
       
-      if (response && response.content && response.content.length > 0) {
+      if (response && response.content) {
         setTemplateData(response.content);
         setTemplateTotal(response.totalElements || 0);
-        setUseTemplateMockData(false);
       } else {
-        const mockData = generateMockTemplates(templatePageSize);
-        setTemplateData(mockData.content);
-        setTemplateTotal(mockData.totalElements);
-        setUseTemplateMockData(true);
+        setTemplateData([]);
+        setTemplateTotal(0);
       }
     } catch (error) {
       console.error('加载装备模板列表失败:', error);
-      const mockData = generateMockTemplates(templatePageSize);
-      setTemplateData(mockData.content);
-      setTemplateTotal(mockData.totalElements);
-      setUseTemplateMockData(true);
+      message.error('加载装备模板列表失败');
+      setTemplateData([]);
+      setTemplateTotal(0);
     } finally {
       setTemplateLoading(false);
     }
   };
 
   const handleDeleteItem = async (id) => {
-    if (useItemMockData) {
-      message.warning('演示模式下无法删除数据');
-      return;
-    }
-    
     try {
       await equipmentItemApi.deleteEquipmentItem(id);
       message.success('删除成功');
@@ -301,11 +197,6 @@ const Equipment = () => {
   };
 
   const handleDeleteList = async (id) => {
-    if (useListMockData) {
-      message.warning('演示模式下无法删除数据');
-      return;
-    }
-    
     try {
       await equipmentListApi.deleteEquipmentList(id);
       message.success('删除成功');
@@ -317,11 +208,6 @@ const Equipment = () => {
   };
 
   const handleCreateItem = async (values) => {
-    if (useItemMockData) {
-      message.warning('演示模式下无法创建数据');
-      return;
-    }
-    
     try {
       await equipmentItemApi.createEquipmentItem(values);
       message.success('创建成功');
@@ -668,12 +554,6 @@ const Equipment = () => {
               </Space>
             </div>
 
-            {useItemMockData && (
-              <div style={{ marginBottom: 16 }}>
-                <Tag color="orange">演示模式</Tag>
-              </div>
-            )}
-
             <Spin spinning={itemLoading}>
               <Table
                 columns={itemColumns}
@@ -735,12 +615,6 @@ const Equipment = () => {
               </Button>
             </div>
 
-            {useListMockData && (
-              <div style={{ marginBottom: 16 }}>
-                <Tag color="orange">演示模式</Tag>
-              </div>
-            )}
-
             <Spin spinning={listLoading}>
               <Table
                 columns={listColumns}
@@ -782,12 +656,6 @@ const Equipment = () => {
                 刷新
               </Button>
             </div>
-
-            {useTemplateMockData && (
-              <div style={{ marginBottom: 16 }}>
-                <Tag color="orange">演示模式</Tag>
-              </div>
-            )}
 
             <Spin spinning={templateLoading}>
               <Table
