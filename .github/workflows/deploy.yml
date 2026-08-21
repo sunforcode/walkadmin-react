@@ -33,12 +33,29 @@ jobs:
           WALK_SERVER: ${{ secrets.WALK_SERVER }}
           WALK_REMOTE_DIR: ${{ secrets.WALK_REMOTE_DIR }}
         run: |
+          # rsync 退出码 24 = 部分传输（某些文件被跳过），通常是可接受的，
+          # 不阻断后续 build。
           rsync -az --delete \
             --exclude '.git' \
             --exclude 'node_modules' \
             --exclude 'dist' \
             . \
-            "$WALK_SERVER:$WALK_REMOTE_DIR/walkadmin-react/"
+            "$WALK_SERVER:$WALK_REMOTE_DIR/walkadmin-react/" || {
+              code=$?
+              if [ "$code" -eq 24 ]; then
+                echo "rsync exit 24 (partial transfer / some files skipped) — continuing"
+              else
+                exit $code
+              fi
+            }
+
+      - name: Verify sync succeeded
+        env:
+          WALK_SERVER: ${{ secrets.WALK_SERVER }}
+          WALK_REMOTE_DIR: ${{ secrets.WALK_REMOTE_DIR }}
+        run: |
+          ssh "$WALK_SERVER" "test -f $WALK_REMOTE_DIR/walkadmin-react/Dockerfile" || { echo "Sync failed: Dockerfile missing"; exit 1; }
+          echo "Sync verified."
 
       - name: Build and restart web
         env:
