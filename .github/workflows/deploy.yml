@@ -21,33 +21,52 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
+      - name: Debug WALK_SERVER value
+        env:
+          WALK_SERVER: ${{ secrets.WALK_SERVER }}
+        run: |
+          echo "WALK_SERVER length: ${#WALK_SERVER}"
+          echo "WALK_SERVER hex dump:"
+          printf '%s' "$WALK_SERVER" | xxd | head -5
+          echo "---"
+          # 如果值含换行/空格，ssh 会报 hostname contains invalid characters
+          CLEAN=$(printf '%s' "$WALK_SERVER" | tr -d '\n\r')
+          if [ "$CLEAN" != "$WALK_SERVER" ]; then
+            echo "::error::WALK_SERVER contains newline/carriage return — secret value is dirty. Re-save it without trailing newline."
+          fi
+
       - name: Trust server host key
         env:
           WALK_SERVER: ${{ secrets.WALK_SERVER }}
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${WALK_SERVER##*@}" >> ~/.ssh/known_hosts
+          # 去掉可能的前后空白/换行，再取 hostname 部分做 keyscan
+          HOST=$(printf '%s' "$WALK_SERVER" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          ssh-keyscan -H "${HOST##*@}" >> ~/.ssh/known_hosts
 
       - name: Sync code to server
         env:
           WALK_SERVER: ${{ secrets.WALK_SERVER }}
           WALK_REMOTE_DIR: ${{ secrets.WALK_REMOTE_DIR }}
         run: |
+          # 清洗 secret 值中可能混入的换行/回车/前后空格
+          HOST=$(printf '%s' "$WALK_SERVER" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
           # tar + ssh 替代 rsync：避免 CI runner 上 rsync 偶发退出码非零的问题。
           # 先清空目标目录（保留 .env 和 compose 无关文件），再解压新代码。
-          ssh "$WALK_SERVER" "rm -rf $WALK_REMOTE_DIR/walkadmin-react && mkdir -p $WALK_REMOTE_DIR/walkadmin-react"
+          ssh "$HOST" "rm -rf $WALK_REMOTE_DIR/walkadmin-react && mkdir -p $WALK_REMOTE_DIR/walkadmin-react"
           tar czf - \
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='dist' \
             . \
-            | ssh "$WALK_SERVER" "tar xzf - -C $WALK_REMOTE_DIR/walkadmin-react/"
-          ssh "$WALK_SERVER" "test -f $WALK_REMOTE_DIR/walkadmin-react/Dockerfile" || { echo "Sync failed: Dockerfile missing"; exit 1; }
+            | ssh "$HOST" "tar xzf - -C $WALK_REMOTE_DIR/walkadmin-react/"
+          ssh "$HOST" "test -f $WALK_REMOTE_DIR/walkadmin-react/Dockerfile" || { echo "Sync failed: Dockerfile missing"; exit 1; }
 
       - name: Build and restart web
         env:
           WALK_SERVER: ${{ secrets.WALK_SERVER }}
           WALK_REMOTE_DIR: ${{ secrets.WALK_REMOTE_DIR }}
         run: |
-          ssh "$WALK_SERVER" "cd $WALK_REMOTE_DIR/deploy && docker compose build web"
-          ssh "$WALK_SERVER" "cd $WALK_REMOTE_DIR/deploy && docker compose up -d web"
+          HOST=$(printf '%s' "$WALK_SERVER" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          ssh "$HOST" "cd $WALK_REMOTE_DIR/deploy && docker compose build web"
+          ssh "$HOST" "cd $WALK_REMOTE_DIR/deploy && docker compose up -d web"
