@@ -1,6 +1,15 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8080/walkbg';
+/**
+ * 后端 API 基地址。
+ *
+ * 默认使用同源相对路径 '/walkbg'，由部署环境的反向代理转发到真实后端，
+ * 因此构建产物不含任何环境相关地址，同一份 dist 可部署到任意环境。
+ *
+ * 本地开发通过 vite.config.js 的 server.proxy 转发到本地后端。
+ * 如需指向独立域名的后端（跨域部署），构建时设置 VITE_API_BASE_URL。
+ */
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/walkbg';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -31,7 +40,9 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('walk_admin_token');
       localStorage.removeItem('walk_admin_user');
-      window.location.href = '/login';
+      // 使用 BASE_URL 拼接，保证部署在子路径下时也能正确跳转
+      const base = import.meta.env.BASE_URL || '/';
+      window.location.href = `${base.replace(/\/$/, '')}/login`;
     }
     return Promise.reject(error);
   }
@@ -107,9 +118,11 @@ export const extractApiData = (response) => {
 };
 
 export const authApi = {
-  login: async (email, password) => {
+  // 后端 UserLoginRequest 只接受 username/password 两个字段，
+  // 传 email 会因 username 缺失而被 JSON 反序列化直接拒绝（400）。
+  login: async (username, password) => {
     try {
-      const response = await api.post('/api/v1/auth/login', { email, password });
+      const response = await api.post('/api/v1/auth/login', { username, password });
       return response.data;
     } catch (error) {
       throw error;

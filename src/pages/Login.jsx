@@ -14,12 +14,14 @@ const Login = () => {
   const onFinish = async (values) => {
     setLoading(true);
     try {
-      const response = await authApi.login(values.email, values.password);
+      const response = await authApi.login(values.username, values.password);
       
       if (response.code === 0 || response.success) {
         const data = response.data || response;
         const token = data.token || data.accessToken;
-        const user = data.user || { email: values.email, username: values.email.split('@')[0] };
+        // 后端登录响应把用户字段平铺在 data 上（无 data.user），
+        // 因此优先取 data 自身，最后才回落到表单里的用户名。
+        const user = data.user || { username: data.username || values.username, email: data.email };
         
         login(token, user);
         message.success('登录成功');
@@ -50,16 +52,18 @@ const Login = () => {
             autoComplete="off"
             size="large"
           >
+            {/* 后端以 username 作为登录标识（见 UserLoginRequest），
+                不接受邮箱登录，故此处不能再做邮箱格式校验。 */}
             <Form.Item
-              name="email"
+              name="username"
               rules={[
-                { required: true, message: '请输入邮箱' },
-                { type: 'email', message: '请输入有效的邮箱地址' }
+                { required: true, message: '请输入用户名' },
+                { min: 3, max: 50, message: '用户名长度必须在3-50字符之间' }
               ]}
             >
-              <Input 
-                prefix={<UserOutlined />} 
-                placeholder="请输入邮箱" 
+              <Input
+                prefix={<UserOutlined />}
+                placeholder="请输入用户名"
               />
             </Form.Item>
 
