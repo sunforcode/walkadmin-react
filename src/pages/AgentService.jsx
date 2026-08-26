@@ -25,19 +25,29 @@ import {
   ReloadOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
-  ApiOutlined,
   LinkOutlined,
   UploadOutlined,
   EyeOutlined,
   WifiOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  UpOutlined,
 } from '@ant-design/icons';
-import { agentServiceApi, routeApi } from '../services/api';
+import { agentServiceApi, routeApi, API_BASE_URL } from '../services/api';
+import {
+  appendExecutionEvent,
+  closeEventSourceAfterError,
+  formatExecutionEventTime,
+  getCompletionPresentation,
+  getExecutionEventIdentity,
+  normalizeTaskEvent,
+} from './agentServiceHelpers';
 import { useNavigate } from 'react-router-dom';
 
 const { Option } = Select;
 
-// walkbg 后端 base URL（与 api.js 保持一致）
-const WALKBG_BASE_URL = 'http://localhost:8080/walkbg';
+// 后端 base URL 统一复用 api.js 的定义，避免两处配置漂移。
+// EventSource 无法使用 axios 实例，因此这里直接拼接 URL。
 
 const AgentService = () => {
   const [form] = Form.useForm();
@@ -54,7 +64,14 @@ const AgentService = () => {
 
   // SSE 进度状态
   const [taskProgress, setTaskProgress] = useState(null);
-  // taskProgress 结构: { status, progress, currentStep, routeId, error }
+  // taskProgress 结构: { status, progress, currentStep, routeId, error, executionEvent, degraded }
+
+  // 当前页面会话的实时 Console，不持久化
+  const [executionEvents, setExecutionEvents] = useState([]);
+  const [consoleCollapsed, setConsoleCollapsed] = useState(false);
+  const [consoleUnread, setConsoleUnread] = useState(false);
+  const consoleCollapsedRef = useRef(false);
+  const consoleEndRef = useRef(null);
 
   // SSE 连接状态
   const [sseConnected, setSseConnected] = useState(false);
@@ -101,6 +118,12 @@ const AgentService = () => {
       startProgressAnimation(taskProgress.progress || 10);
     }
   }, [taskProgress]);
+
+  useEffect(() => {
+    if (executionEvents.length > 0 && !consoleCollapsed) {
+      consoleEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [executionEvents, consoleCollapsed]);
 
   /**
    * 启动缓慢进度条动画
@@ -183,6 +206,38 @@ const AgentService = () => {
     }
   };
 
+  const handleSseTaskEvent = (rawData) => {
+    const nextTaskProgress = normalizeTaskEvent(rawData);
+    setTaskProgress(nextTaskProgress);
+    setExecutionEvents((events) => appendExecutionEvent(events, nextTaskProgress));
+    if (nextTaskProgress.executionEvent && consoleCollapsedRef.current) {
+      setConsoleUnread(true);
+    }
+
+    if (nextTaskProgress.status === 'completed') {
+      const completion = getCompletionPresentation(nextTaskProgress);
+      if (nextTaskProgress.degraded) {
+        message.warning(completion.message);
+      } else {
+        message.success('分析任务完成！路线数据已更新');
+      }
+      closeEventSource();
+    } else if (nextTaskProgress.status === 'failed') {
+      message.error(`分析任务失败: ${nextTaskProgress.error || '未知错误'}`);
+      closeEventSource();
+    }
+  };
+
+  const parseSseEvent = (event, eventName) => {
+    try {
+      const data = JSON.parse(event.data);
+      console.log(`[SSE] 收到 ${eventName} 事件:`, data);
+      handleSseTaskEvent(data);
+    } catch (error) {
+      console.error(`[SSE] 解析 ${eventName} 事件失败:`, error);
+    }
+  };
+
   /**
    * 建立 SSE 连接，订阅分析进度（4.1）
    */
@@ -192,9 +247,13 @@ const AgentService = () => {
 
     setSseDisconnected(false);
     setAnimatedProgress(0);
-    setTaskProgress({ status: 'pending', progress: 0, currentStep: '等待分析任务启动...' });
+    setExecutionEvents([]);
+    consoleCollapsedRef.current = false;
+    setConsoleCollapsed(false);
+    setConsoleUnread(false);
+    setTaskProgress({ status: 'pending', progress: 0, currentStep: '等待分析任务启动...', degraded: false });
 
-    const sseUrl = `${WALKBG_BASE_URL}/api/v1/route-analysis/tasks/${taskId}/stream`;
+    const sseUrl = `${API_BASE_URL}/api/v1/route-analysis/tasks/${taskId}/stream`;
     console.log('[SSE] 建立连接:', sseUrl);
 
     const es = new EventSource(sseUrl);
@@ -206,55 +265,23 @@ const AgentService = () => {
       console.log('[SSE] 连接已建立');
     };
 
-    // 监听 progress 事件（4.2）
-    es.addEventListener('progress', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        console.log('[SSE] 收到进度事件:', data);
-        setTaskProgress(data);
-
-        if (data.status === 'completed') {
-          // 4.3: 分析完成
-          message.success('分析任务完成！路线数据已更新');
-          closeEventSource();
-        } else if (data.status === 'failed') {
-          // 4.4: 分析失败
-          message.error(`分析任务失败: ${data.error || '未知错误'}`);
-          closeEventSource();
-        }
-      } catch (err) {
-        console.error('[SSE] 解析事件数据失败:', err);
-      }
-    });
+    // execution_event 和 degraded 作为 progress data 的可选字段处理
+    es.addEventListener('progress', (event) => parseSseEvent(event, 'progress'));
 
     // 兼容默认 message 事件（无 event name 时）
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        console.log('[SSE] 收到 message 事件:', data);
-        setTaskProgress(data);
-
-        if (data.status === 'completed') {
-          message.success('分析任务完成！路线数据已更新');
-          closeEventSource();
-        } else if (data.status === 'failed') {
-          message.error(`分析任务失败: ${data.error || '未知错误'}`);
-          closeEventSource();
-        }
-      } catch (err) {
-        console.error('[SSE] 解析 message 事件失败:', err);
-      }
-    };
+    es.onmessage = (event) => parseSseEvent(event, 'message');
 
     // SSE 连接断开（4.5）
     es.onerror = (e) => {
       console.warn('[SSE] 连接出错或断开:', e);
-      // EventSource 在连接关闭后会持续触发 onerror，需判断 readyState
-      if (es.readyState === EventSource.CLOSED) {
+      closeEventSourceAfterError(es, () => {
+        if (eventSourceRef.current === es) {
+          eventSourceRef.current = null;
+        }
         setSseConnected(false);
         setSseDisconnected(true);
-        console.log('[SSE] 连接已关闭');
-      }
+        console.log('[SSE] 连接已关闭，等待手动刷新状态');
+      });
     };
   };
 
@@ -266,18 +293,19 @@ const AgentService = () => {
     try {
       const response = await agentServiceApi.getTaskStatus(currentTaskId);
       if (response) {
-        setTaskProgress({
-          status: response.status,
-          progress: response.progress || 0,
-          currentStep: response.current_step || response.currentStep,
-          error: response.error,
-        });
+        const nextTaskProgress = normalizeTaskEvent(response);
+        setTaskProgress(nextTaskProgress);
         if (response.status === 'completed') {
-          message.success('任务已完成');
+          const completion = getCompletionPresentation(nextTaskProgress);
+          if (nextTaskProgress.degraded) {
+            message.warning(completion.message);
+          } else {
+            message.success('任务已完成');
+          }
           setSseDisconnected(false);
         }
       }
-    } catch (error) {
+    } catch {
       message.error('查询状态失败');
     }
   };
@@ -372,8 +400,14 @@ const AgentService = () => {
         return <Tag color="default">等待中</Tag>;
       case 'processing':
         return <Tag color="processing">分析中</Tag>;
-      case 'completed':
-        return <Tag color="success" icon={<CheckCircleOutlined />}>已完成</Tag>;
+      case 'completed': {
+        const completion = getCompletionPresentation(taskProgress);
+        return (
+          <Tag color={taskProgress.degraded ? 'warning' : 'success'} icon={<CheckCircleOutlined />}>
+            {completion.label}
+          </Tag>
+        );
+      }
       case 'failed':
         return <Tag color="error" icon={<CloseCircleOutlined />}>失败</Tag>;
       default:
@@ -488,25 +522,114 @@ const AgentService = () => {
           )}
 
           {/* 完成提示 + 查看路线按钮（4.3） */}
-          {taskProgress?.status === 'completed' && (
-            <Alert
-              type="success"
-              showIcon
-              message="✅ 分析完成，数据已写入路线"
-              description={
-                <Space>
-                  <Text>路线数据已更新，可前往路线管理页查看分析结果。</Text>
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<EyeOutlined />}
-                    onClick={() => navigate('/routes' + (currentRouteId ? `?highlight=${currentRouteId}` : ''))}
+          {taskProgress?.status === 'completed' && (() => {
+            const completion = getCompletionPresentation(taskProgress);
+            return (
+              <Alert
+                type={completion.alertType}
+                showIcon
+                message={completion.message}
+                description={
+                  <Space>
+                    <Text>
+                      {taskProgress.degraded
+                        ? '路线数据已写入，但请检查 Console 中的降级警告。'
+                        : '路线数据已更新，可前往路线管理页查看分析结果。'}
+                    </Text>
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<EyeOutlined />}
+                      onClick={() => navigate('/routes' + (currentRouteId ? `?highlight=${currentRouteId}` : ''))}
+                    >
+                      查看路线
+                    </Button>
+                  </Space>
+                }
+                style={{ marginBottom: 12 }}
+              />
+            );
+          })()}
+
+          <Divider style={{ margin: '16px 0' }} />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Space>
+              <Text strong>实时 Console</Text>
+              <Tag>{executionEvents.length} 条</Tag>
+              {consoleUnread && <Tag color="blue">有新事件</Tag>}
+            </Space>
+            <Space>
+              <Button
+                size="small"
+                icon={<DeleteOutlined />}
+                disabled={executionEvents.length === 0}
+                onClick={() => {
+                  setExecutionEvents([]);
+                  setConsoleUnread(false);
+                }}
+              >
+                清空
+              </Button>
+              <Button
+                size="small"
+                icon={consoleCollapsed ? <DownOutlined /> : <UpOutlined />}
+                onClick={() => {
+                  const nextCollapsed = !consoleCollapsedRef.current;
+                  consoleCollapsedRef.current = nextCollapsed;
+                  setConsoleCollapsed(nextCollapsed);
+                  setConsoleUnread(false);
+                }}
+              >
+                {consoleCollapsed ? '展开' : '收起'}
+              </Button>
+            </Space>
+          </div>
+
+          {!consoleCollapsed && (
+            <div
+              role="log"
+              aria-live="polite"
+              style={{
+                marginTop: 12,
+                maxHeight: 280,
+                overflowY: 'auto',
+                padding: 12,
+                borderRadius: 6,
+                background: '#141414',
+                color: '#d9d9d9',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                fontSize: 12,
+              }}
+            >
+              {executionEvents.length === 0 ? (
+                <div style={{ color: '#8c8c8c' }}>等待 Agent 执行事件...</div>
+              ) : (
+                executionEvents.map((event, index) => (
+                  <div
+                    key={getExecutionEventIdentity(event)}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '72px minmax(100px, 150px) 86px 1fr',
+                      gap: 8,
+                      padding: '5px 0',
+                      borderBottom: index === executionEvents.length - 1 ? 'none' : '1px solid #303030',
+                      color: event.level === 'error'
+                        ? '#ff7875'
+                        : event.level === 'warning' || event.phase === 'degraded'
+                          ? '#ffc53d'
+                          : '#d9d9d9',
+                    }}
                   >
-                    查看路线
-                  </Button>
-                </Space>
-              }
-            />
+                    <span>{formatExecutionEventTime(event.timestamp)}</span>
+                    <span>{event.node || '-'}</span>
+                    <span>{event.phase || event.level || '-'}</span>
+                    <span>{event.message || '-'}</span>
+                  </div>
+                ))
+              )}
+              <div ref={consoleEndRef} />
+            </div>
           )}
         </Card>
       )}
@@ -544,7 +667,7 @@ const AgentService = () => {
                 noStyle
                 rules={kmlInputMode === 'url' ? [{ required: true, message: '请输入 KML 文件 URL' }] : []}
               >
-                <Input placeholder="例如: http://walkbg:8080/static/kml/wutaishan.kml" />
+                <Input placeholder="例如: https://example.com/path/to/route.kml" />
               </Form.Item>
             ) : (
               <div>
