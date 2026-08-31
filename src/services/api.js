@@ -175,6 +175,94 @@ export const routeApi = {
     const response = await api.get('/api/v1/routes/popular', { params: { limit } });
     return extractApiData(response);
   },
+
+  createRoute: async (data) => {
+    const response = await api.post('/api/v1/routes', data);
+    return extractApiData(response);
+  },
+
+  // 路段拆分：在指定轨迹索引处拆为两段
+  splitSegment: async (routeId, segmentId, splitTrackIndex, splitPoint = null) => {
+    const body = { split_track_index: splitTrackIndex };
+    if (splitPoint) body.splitPoint = splitPoint;
+    const response = await api.post(`/api/v1/routes/${routeId}/segments/${segmentId}/split`, body);
+    return extractApiData(response);
+  },
+
+  // 采纳草稿数据
+  adoptSegment: async (routeId, segmentId) => {
+    const response = await api.post(`/api/v1/routes/${routeId}/segments/${segmentId}/adopt`);
+    return extractApiData(response);
+  },
+
+  adoptAllSegments: async (routeId) => {
+    const response = await api.post(`/api/v1/routes/${routeId}/segments/adopt-all`);
+    return extractApiData(response);
+  },
+
+  adoptPoi: async (routeId, poiId) => {
+    const response = await api.post(`/api/v1/routes/${routeId}/pois/${poiId}/adopt`);
+    return extractApiData(response);
+  },
+
+  adoptAllPois: async (routeId) => {
+    const response = await api.post(`/api/v1/routes/${routeId}/pois/adopt-all`);
+    return extractApiData(response);
+  },
+
+  // 合并多个路段为一个
+  mergeSegments: async (routeId, segmentIds, name = null) => {
+    const response = await api.post(`/api/v1/routes/${routeId}/segments/merge`, {
+      segment_ids: segmentIds,
+      name,
+    });
+    return extractApiData(response);
+  },
+
+  // 路段改名
+  renameSegment: async (routeId, segmentId, name) => {
+    const response = await api.put(`/api/v1/routes/${routeId}/segments/${segmentId}/name`, { name });
+    return extractApiData(response);
+  },
+
+  // POI 改名
+  renamePoi: async (routeId, poiId, name) => {
+    const response = await api.put(`/api/v1/routes/${routeId}/pois/${poiId}/name`, { name });
+    return extractApiData(response);
+  },
+
+  // AI（LLM）筛选路线 POI，返回预览结果（保留/剔除+理由），不落库
+  filterPoisPreview: async (routeId) => {
+    const response = await api.post(
+      '/api/v1/poi-library/filter-preview',
+      { route_id: routeId },
+      { timeout: 320000 }
+    );
+    return extractApiData(response);
+  },
+
+  // 把人工确认的 POI 存入全局库，并回写路线 POI 为已采纳
+  savePoiLibrary: async (routeId, items) => {
+    const response = await api.post(
+      '/api/v1/poi-library/save',
+      { route_id: routeId, items },
+      { timeout: 30000 }
+    );
+    return extractApiData(response);
+  },
+};
+
+// 全局 POI 库
+export const poiLibraryApi = {
+  list: async () => {
+    const response = await api.get('/api/v1/poi-library');
+    return extractApiData(response);
+  },
+
+  remove: async (id) => {
+    const response = await api.delete(`/api/v1/poi-library/${id}`);
+    return extractApiData(response);
+  },
 };
 
 export const tripApi = {

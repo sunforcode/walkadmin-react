@@ -10,6 +10,7 @@ import {
   UserOutlined,
   ShoppingOutlined,
   CloudServerOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../context/AuthContext';
 import './Layout.css';
@@ -31,6 +32,11 @@ const menuItems = [
     key: '/routes',
     icon: <CompassOutlined />,
     label: '路线管理',
+  },
+  {
+    key: '/poi-library',
+    icon: <DatabaseOutlined />,
+    label: 'POI 库',
   },
   {
     key: '/trips',

@@ -11,6 +11,7 @@ import Trips from './pages/Trips';
 import Guides from './pages/Guides';
 import Equipment from './pages/Equipment';
 import AgentService from './pages/AgentService';
+import PoiLibrary from './pages/PoiLibrary';
 import './App.css';
 
 const PrivateRoute = ({ children }) => {
@@ -41,6 +42,7 @@ const AppContent = () => {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="users" element={<Users />} />
         <Route path="routes" element={<RoutesPage />} />
+        <Route path="poi-library" element={<PoiLibrary />} />
         <Route path="trips" element={<Trips />} />
         <Route path="guides" element={<Guides />} />
         <Route path="equipment" element={<Equipment />} />
