@@ -354,6 +354,7 @@ const Routes = () => {
   const [pageSize, setPageSize] = useState(10);
   const [searchText, setSearchText] = useState('');
   const [selectedDifficulty, setSelectedDifficulty] = useState(undefined);
+  const [selectedStatus, setSelectedStatus] = useState(undefined);
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -404,7 +405,7 @@ const Routes = () => {
 
   useEffect(() => {
     loadRoutes();
-  }, [currentPage, pageSize]);
+  }, [currentPage, pageSize, selectedStatus]);
 
   // 卸载时清理轮询定时器
   useEffect(() => () => {
@@ -414,7 +415,7 @@ const Routes = () => {
   const loadRoutes = async () => {
     setLoading(true);
     try {
-      const response = await routeApi.getRoutes(currentPage - 1, pageSize, searchText, selectedDifficulty);
+      const response = await routeApi.getRoutes(currentPage - 1, pageSize, searchText, selectedDifficulty, selectedStatus);
 
       if (response && response.content) {
         setData(response.content);
@@ -1023,6 +1024,21 @@ const Routes = () => {
             <Option value="3">中等</Option>
             <Option value="4">较难</Option>
             <Option value="5">困难</Option>
+          </Select>
+          <Select
+            placeholder="选择状态"
+            allowClear
+            style={{ width: 130 }}
+            value={selectedStatus}
+            onChange={(value) => {
+              setSelectedStatus(value);
+              setCurrentPage(1);
+            }}
+          >
+            <Option value={0}>规划中</Option>
+            <Option value={1}>已发布</Option>
+            <Option value={2}>已关闭</Option>
+            <Option value={3}>分析中</Option>
           </Select>
         </div>
         <Space>

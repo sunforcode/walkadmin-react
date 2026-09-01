@@ -167,12 +167,14 @@ export const userApi = {
 };
 
 export const routeApi = {
-  getRoutes: async (page = 0, size = 10, keyword = null, difficulty = null) => {
+  getRoutes: async (page = 0, size = 10, keyword = null, difficulty = null, status = null) => {
     const params = { page, size };
     if (keyword) params.keyword = keyword;
     if (difficulty !== null) params.difficulty = difficulty;
-    
-    const response = await api.get('/api/v1/routes', { params });
+    if (status !== null && status !== undefined) params.status = status;
+
+    // 管理端专用接口：返回全部状态，支持按状态筛选；公共接口只返回已发布
+    const response = await api.get('/api/v1/admin/routes', { params });
     return extractApiData(response);
   },
   
