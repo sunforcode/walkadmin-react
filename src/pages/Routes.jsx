@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin, Tabs, Collapse, Badge, InputNumber, Progress, Checkbox } from 'antd';
-import { SearchOutlined, ReloadOutlined, EyeOutlined, EnvironmentOutlined, ThunderboltOutlined, PlusOutlined, CheckOutlined, ScissorOutlined, RocketOutlined, AimOutlined, EditOutlined, MergeCellsOutlined, RobotOutlined } from '@ant-design/icons';
-import { routeApi, agentServiceApi, formatTimestamp, getDifficultyText, getDifficultyTagColor } from '../services/api';
+import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin, Tabs, Collapse, Badge, InputNumber, Progress, Checkbox, Popconfirm } from 'antd';
+import { SearchOutlined, ReloadOutlined, EyeOutlined, EnvironmentOutlined, ThunderboltOutlined, PlusOutlined, CheckOutlined, ScissorOutlined, RocketOutlined, AimOutlined, EditOutlined, MergeCellsOutlined, RobotOutlined, DeleteOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
+import { routeApi, agentServiceApi, formatTimestamp, getDifficultyText, getDifficultyTagColor, getRouteStatusText, getRouteStatusColor } from '../services/api';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -397,6 +397,11 @@ const Routes = () => {
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
 
+  // 编辑路线（管理端）
+  const [editRoute, setEditRoute] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', description: '', region: '', difficulty: 2, is_loop: false });
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
   useEffect(() => {
     loadRoutes();
   }, [currentPage, pageSize]);
@@ -501,6 +506,83 @@ const Routes = () => {
       setCreating(false);
     }
   };
+
+  // ===================== 编辑路线（管理端） =====================
+  const openEditModal = (route) => {
+    setEditRoute(route);
+    setEditForm({
+      name: route.name || '',
+      description: route.description || '',
+      region: route.region || '',
+      difficulty: route.difficulty || 2,
+      is_loop: !!route.is_loop,
+    });
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editForm.name.trim()) {
+      message.warning('请输入路线名称');
+      return;
+    }
+    setEditSubmitting(true);
+    try {
+      await routeApi.updateRoute(editRoute.id, {
+        name: editForm.name.trim(),
+        description: editForm.description.trim() || null,
+        region: editForm.region.trim() || null,
+        difficulty: editForm.difficulty,
+        is_loop: editForm.is_loop,
+      });
+      message.success('路线已更新');
+      setEditRoute(null);
+      loadRoutes();
+    } catch (error) {
+      console.error('更新路线失败:', error);
+      message.error(error.response?.data?.message || '更新路线失败');
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  // ===================== 路线状态流转 / 删除（管理端） =====================
+  const handleStatusChange = async (route, targetStatus) => {
+    try {
+      await routeApi.changeRouteStatus(route.id, targetStatus);
+      message.success(`路线已${getRouteStatusText(targetStatus)}`);
+      loadRoutes();
+    } catch (error) {
+      console.error('状态流转失败:', error);
+      const msg = error.response?.data?.message || '状态流转失败';
+      // 发布前检查失败等场景，弹窗展示完整原因
+      Modal.warning({ title: '操作未完成', content: msg });
+    }
+  };
+
+  const doDeleteRoute = async (route, force) => {
+    try {
+      await routeApi.deleteRoute(route.id, force);
+      message.success('路线已删除');
+      loadRoutes();
+    } catch (error) {
+      console.error('删除路线失败:', error);
+      const msg = error.response?.data?.message || '';
+      // 被未取消行程引用时，后端返回 409，提供强制删除入口
+      if (error.response?.status === 409 && !force) {
+        Modal.confirm({
+          title: '路线被行程引用',
+          content: msg,
+          okText: '强制删除',
+          okButtonProps: { danger: true },
+          cancelText: '取消',
+          onOk: () => doDeleteRoute(route, true),
+        });
+        return;
+      }
+      message.error(msg || '删除路线失败');
+    }
+  };
+
+  const handleDeleteRoute = (route) => doDeleteRoute(route, false);
 
   // ===================== KML 分析 =====================
   const startAnalysis = async () => {
@@ -781,6 +863,15 @@ const Routes = () => {
       key: 'name',
     },
     {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 90,
+      render: (status) => (
+        <Tag color={getRouteStatusColor(status)}>{getRouteStatusText(status)}</Tag>
+      ),
+    },
+    {
       title: '区域',
       dataIndex: 'region',
       key: 'region',
@@ -817,7 +908,7 @@ const Routes = () => {
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 280,
       render: (_, record) => (
         <Space size="small">
           <Button
@@ -828,6 +919,47 @@ const Routes = () => {
           >
             查看
           </Button>
+          {record.status !== 3 && (
+            <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)}>
+              编辑
+            </Button>
+          )}
+          {record.status === 0 && (
+            <Popconfirm
+              title="发布该路线？"
+              description="发布前会自动检查轨迹数据与未采纳草稿"
+              onConfirm={() => handleStatusChange(record, 1)}
+            >
+              <Button size="small" type="primary" ghost icon={<SendOutlined />}>
+                发布
+              </Button>
+            </Popconfirm>
+          )}
+          {record.status === 1 && (
+            <Popconfirm title="下线该路线？下线后 C 端不可见，路线回到规划中。" onConfirm={() => handleStatusChange(record, 0)}>
+              <Button size="small" icon={<StopOutlined />}>
+                下线
+              </Button>
+            </Popconfirm>
+          )}
+          {record.status === 2 && (
+            <Popconfirm title="重新发布该路线？" onConfirm={() => handleStatusChange(record, 1)}>
+              <Button size="small" type="primary" ghost icon={<SendOutlined />}>
+                重新发布
+              </Button>
+            </Popconfirm>
+          )}
+          {record.status !== 3 && (
+            <Popconfirm
+              title="删除该路线？"
+              description="软删除后列表与 C 端均不可见，且不可恢复"
+              onConfirm={() => handleDeleteRoute(record)}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -986,6 +1118,67 @@ const Routes = () => {
               placeholder="路线简介（可选）"
               value={createForm.description}
               onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* 编辑路线 Modal */}
+      <Modal
+        title={`编辑路线: ${editRoute?.name || ''}`}
+        open={!!editRoute}
+        onCancel={() => setEditRoute(null)}
+        onOk={handleEditSubmit}
+        confirmLoading={editSubmitting}
+        okText="保存"
+        cancelText="取消"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <div style={{ marginBottom: 4 }}>路线名称 <span style={{ color: 'red' }}>*</span></div>
+            <Input
+              value={editForm.name}
+              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+            />
+          </div>
+          <div>
+            <div style={{ marginBottom: 4 }}>区域</div>
+            <Input
+              value={editForm.region}
+              onChange={(e) => setEditForm({ ...editForm, region: e.target.value })}
+            />
+          </div>
+          <div>
+            <div style={{ marginBottom: 4 }}>难度</div>
+            <Select
+              style={{ width: '100%' }}
+              value={editForm.difficulty}
+              onChange={(value) => setEditForm({ ...editForm, difficulty: value })}
+            >
+              <Option value={1}>简单</Option>
+              <Option value={2}>较易</Option>
+              <Option value={3}>中等</Option>
+              <Option value={4}>较难</Option>
+              <Option value={5}>困难</Option>
+            </Select>
+          </div>
+          <div>
+            <div style={{ marginBottom: 4 }}>是否环线</div>
+            <Select
+              style={{ width: '100%' }}
+              value={editForm.is_loop}
+              onChange={(value) => setEditForm({ ...editForm, is_loop: value })}
+            >
+              <Option value={false}>否</Option>
+              <Option value={true}>是</Option>
+            </Select>
+          </div>
+          <div>
+            <div style={{ marginBottom: 4 }}>描述</div>
+            <Input.TextArea
+              rows={3}
+              value={editForm.description}
+              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
             />
           </div>
         </div>

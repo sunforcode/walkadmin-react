@@ -94,6 +94,16 @@ export const getGuideStatusColor = (status) => {
   return map[status] || 'default';
 };
 
+export const getRouteStatusText = (status) => {
+  const map = { 0: '规划中', 1: '已发布', 2: '已关闭', 3: '分析中' };
+  return map[status] ?? '未知';
+};
+
+export const getRouteStatusColor = (status) => {
+  const map = { 0: 'orange', 1: 'green', 2: 'red', 3: 'blue' };
+  return map[status] ?? 'default';
+};
+
 export const extractApiData = (response) => {
   if (!response) return null;
   const data = response.data;
@@ -178,6 +188,40 @@ export const routeApi = {
 
   createRoute: async (data) => {
     const response = await api.post('/api/v1/routes', data);
+    return extractApiData(response);
+  },
+
+  // 更新路线基本信息（管理端，仅更新传入字段）
+  updateRoute: async (routeId, data) => {
+    const response = await api.put(`/api/v1/routes/${routeId}`, data);
+    return extractApiData(response);
+  },
+
+  // 路线状态流转：0规划中 1已发布 2已关闭
+  changeRouteStatus: async (routeId, targetStatus, reason = null) => {
+    const response = await api.post(`/api/v1/routes/${routeId}/status`, {
+      target_status: targetStatus,
+      reason,
+    });
+    return extractApiData(response);
+  },
+
+  // 删除路线（软删除），被未取消行程引用时后端会拒绝
+  deleteRoute: async (routeId, force = false) => {
+    const response = await api.delete(`/api/v1/routes/${routeId}`, {
+      params: force ? { force: true } : undefined,
+    });
+    return extractApiData(response);
+  },
+
+  // 上传 KML 文件，返回 { kml_url, file_size }（kml_url 为相对路径）
+  uploadKml: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post('/api/v1/route-analysis/kml/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    });
     return extractApiData(response);
   },
 
