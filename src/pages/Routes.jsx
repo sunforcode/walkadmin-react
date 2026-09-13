@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin, Tabs, Collapse, Badge, InputNumber, Progress, Checkbox, Popconfirm } from 'antd';
-import { SearchOutlined, ReloadOutlined, EyeOutlined, EnvironmentOutlined, ThunderboltOutlined, PlusOutlined, CheckOutlined, ScissorOutlined, RocketOutlined, AimOutlined, EditOutlined, MergeCellsOutlined, RobotOutlined, DeleteOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
+import { SearchOutlined, ReloadOutlined, EyeOutlined, EnvironmentOutlined, ThunderboltOutlined, PlusOutlined, CheckOutlined, ScissorOutlined, RocketOutlined, AimOutlined, EditOutlined, MergeCellsOutlined, RobotOutlined, DeleteOutlined, SendOutlined, StopOutlined, CloudUploadOutlined } from '@ant-design/icons';
 import { routeApi, agentServiceApi, formatTimestamp, getDifficultyText, getDifficultyTagColor, getRouteStatusText, getRouteStatusColor } from '../services/api';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -586,8 +586,9 @@ const Routes = () => {
   const handleDeleteRoute = (route) => doDeleteRoute(route, false);
 
   // ===================== KML 分析 =====================
-  const startAnalysis = async () => {
-    if (!kmlUrl.trim()) {
+  // useStored=true 时不传 kml_source，由后端回退使用该路线已存的 KML 数据重新分析
+  const startAnalysis = async (useStored = false) => {
+    if (!useStored && !kmlUrl.trim()) {
       message.warning('请输入 KML 文件 URL');
       return;
     }
@@ -595,7 +596,7 @@ const Routes = () => {
     setAnalysisProgress({ progress: 0, current_step: '提交中', message: '' });
     try {
       const result = await agentServiceApi.submitAnalysis({
-        kml_source: kmlUrl.trim(),
+        ...(useStored ? {} : { kml_source: kmlUrl.trim() }),
         route_id: selectedRoute.id,
         enable_content_generation: true,
         enable_poi_query: true,
@@ -1238,12 +1239,25 @@ const Routes = () => {
                   type="primary"
                   icon={<RocketOutlined />}
                   loading={analyzing}
-                  onClick={startAnalysis}
+                  onClick={() => startAnalysis(false)}
                   disabled={!kmlUrl.trim() || analyzing}
                 >
                   开始分析
                 </Button>
+                <Button
+                  icon={<CloudUploadOutlined />}
+                  loading={analyzing}
+                  onClick={() => startAnalysis(true)}
+                  disabled={!selectedRoute?.kml_url || analyzing}
+                >
+                  重新分析
+                </Button>
               </Space.Compact>
+              {selectedRoute?.kml_url && (
+                <div style={{ marginTop: 4, color: '#999', fontSize: 12 }}>
+                  重新分析：不填 URL，直接使用该路线已存的 KML 数据（{selectedRoute.kml_url}）
+                </div>
+              )}
               {analysisProgress && (
                 <div style={{ marginTop: 8 }}>
                   <Progress percent={analysisProgress.progress} size="small" status="active" />
@@ -1403,7 +1417,12 @@ const Routes = () => {
                       width: 90,
                       filters: [{ text: 'AI建议', value: 'draft' }, { text: '已采纳', value: 'confirmed' }],
                       onFilter: (value, record) => (record.status || 'confirmed') === value,
-                      render: (status) => (status === 'draft' ? <Tag color="orange">AI建议</Tag> : <Tag color="green">已采纳</Tag>),
+                      render: (status, record) => (
+  <>
+    {status === 'draft' ? <Tag color="orange">AI建议</Tag> : <Tag color="green">已采纳</Tag>}
+    {record.matched_library_id && <Tag color="blue" style={{ marginLeft: 4 }}>库内已有</Tag>}
+  </>
+),
                     },
                     { title: '来源', dataIndex: 'source', key: 'source', width: 90, render: (v) => v || '-' },
                     {
