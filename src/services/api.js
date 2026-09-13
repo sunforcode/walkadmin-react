@@ -128,11 +128,11 @@ export const extractApiData = (response) => {
 };
 
 export const authApi = {
-  // 后端 UserLoginRequest 只接受 username/password 两个字段，
-  // 传 email 会因 username 缺失而被 JSON 反序列化直接拒绝（400）。
+  // 后端 username/password 登录位于 /api/v1/legacy/auth（AuthController），
+  // 新 /api/v1/auth（AccountAuthController）只有验证码 + session，无 /login 端点。
   login: async (username, password) => {
     try {
-      const response = await api.post('/api/v1/auth/login', { username, password });
+      const response = await api.post('/api/v1/legacy/auth/login', { username, password });
       return response.data;
     } catch (error) {
       throw error;
