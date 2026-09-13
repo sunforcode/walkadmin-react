@@ -317,17 +317,17 @@ export const tripApi = {
     if (keyword) params.keyword = keyword;
     if (status !== null) params.status = status;
     
-    const response = await api.get('/api/v1/trips', { params });
+    const response = await api.get('/api/v1/legacy/trips', { params });
     return extractApiData(response);
   },
   
   getTripById: async (id) => {
-    const response = await api.get(`/api/v1/trips/${id}`);
+    const response = await api.get(`/api/v1/legacy/trips/${id}`);
     return extractApiData(response);
   },
   
   getTripStatistics: async () => {
-    const response = await api.get('/api/v1/trips/statistics');
+    const response = await api.get('/api/v1/legacy/trips/statistics');
     return extractApiData(response);
   },
 };
@@ -436,18 +436,18 @@ export const equipmentListApi = {
     if (type !== null) params.type = type;
     if (status !== null) params.status = status;
     
-    const response = await api.get('/api/v1/equipment-lists', { params });
+    const response = await api.get('/api/v1/legacy/equipment-lists', { params });
     return extractApiData(response);
   },
   
   getEquipmentListById: async (id) => {
-    const response = await api.get(`/api/v1/equipment-lists/${id}`);
+    const response = await api.get(`/api/v1/legacy/equipment-lists/${id}`);
     return extractApiData(response);
   },
   
   createEquipmentList: async (data) => {
     try {
-      const response = await api.post('/api/v1/equipment-lists', data);
+      const response = await api.post('/api/v1/legacy/equipment-lists', data);
       return response.data;
     } catch (error) {
       console.error('创建装备清单失败:', error);
@@ -457,7 +457,7 @@ export const equipmentListApi = {
   
   updateEquipmentList: async (id, data) => {
     try {
-      const response = await api.put(`/api/v1/equipment-lists/${id}`, data);
+      const response = await api.put(`/api/v1/legacy/equipment-lists/${id}`, data);
       return response.data;
     } catch (error) {
       console.error('更新装备清单失败:', error);
@@ -467,7 +467,7 @@ export const equipmentListApi = {
   
   deleteEquipmentList: async (id) => {
     try {
-      const response = await api.delete(`/api/v1/equipment-lists/${id}`);
+      const response = await api.delete(`/api/v1/legacy/equipment-lists/${id}`);
       return response.data;
     } catch (error) {
       console.error('删除装备清单失败:', error);
@@ -477,13 +477,13 @@ export const equipmentListApi = {
   
   getListItems: async (listId, page = 0, size = 20) => {
     const params = { page, size };
-    const response = await api.get(`/api/v1/equipment-lists/${listId}/items`, { params });
+    const response = await api.get(`/api/v1/legacy/equipment-lists/${listId}/items`, { params });
     return extractApiData(response);
   },
   
   addItemToList: async (listId, data) => {
     try {
-      const response = await api.post(`/api/v1/equipment-lists/${listId}/items`, data);
+      const response = await api.post(`/api/v1/legacy/equipment-lists/${listId}/items`, data);
       return response.data;
     } catch (error) {
       console.error('添加装备到清单失败:', error);
@@ -493,7 +493,7 @@ export const equipmentListApi = {
   
   removeItemFromList: async (listId, itemId) => {
     try {
-      const response = await api.delete(`/api/v1/equipment-lists/${listId}/items/${itemId}`);
+      const response = await api.delete(`/api/v1/legacy/equipment-lists/${listId}/items/${itemId}`);
       return response.data;
     } catch (error) {
       console.error('从清单移除装备失败:', error);
@@ -502,13 +502,13 @@ export const equipmentListApi = {
   },
   
   getWeightStats: async (listId) => {
-    const response = await api.get(`/api/v1/equipment-lists/${listId}/weight-stats`);
+    const response = await api.get(`/api/v1/legacy/equipment-lists/${listId}/weight-stats`);
     return extractApiData(response);
   },
   
   updateListStatus: async (listId, status) => {
     try {
-      const response = await api.patch(`/api/v1/equipment-lists/${listId}/status`, { status });
+      const response = await api.patch(`/api/v1/legacy/equipment-lists/${listId}/status`, { status });
       return response.data;
     } catch (error) {
       console.error('更新清单状态失败:', error);
