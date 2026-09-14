@@ -1248,16 +1248,14 @@ const Routes = () => {
                   icon={<CloudUploadOutlined />}
                   loading={analyzing}
                   onClick={() => startAnalysis(true)}
-                  disabled={!selectedRoute?.kml_url || analyzing}
+                  disabled={analyzing}
                 >
                   重新分析
                 </Button>
               </Space.Compact>
-              {selectedRoute?.kml_url && (
-                <div style={{ marginTop: 4, color: '#999', fontSize: 12 }}>
-                  重新分析：不填 URL，直接使用该路线已存的 KML 数据（{selectedRoute.kml_url}）
-                </div>
-              )}
+              <div style={{ marginTop: 4, color: '#999', fontSize: 12 }}>
+                重新分析：优先使用该路线已存的 KML 文件；文件不可用时回退使用数据库已存轨迹点（仅产出轨迹与分段，无 POI 标记）
+              </div>
               {analysisProgress && (
                 <div style={{ marginTop: 8 }}>
                   <Progress percent={analysisProgress.progress} size="small" status="active" />
