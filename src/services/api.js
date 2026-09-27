@@ -199,13 +199,32 @@ export const routeApi = {
     return extractApiData(response);
   },
 
-  // 路线状态流转：0规划中 1已发布 2已关闭
-  changeRouteStatus: async (routeId, targetStatus, reason = null) => {
-    const response = await api.post(`/api/v1/routes/${routeId}/status`, {
-      target_status: targetStatus,
-      reason,
-    });
-    return extractApiData(response);
+  // 发布必须提供显式类型和可重试身份，并核验公共读取结果。
+  changeRouteStatus: async (routeId, targetStatus, reason = null, publication = null) => {
+    const body = { target_status: targetStatus, reason };
+    if (targetStatus === 1) {
+      if (!['one_day', 'multi_day'].includes(publication?.public_route_type)) {
+        throw new Error('请选择公共路线类型');
+      }
+      if (!publication?.publication_id?.trim() || publication.publication_id.length > 64) {
+        throw new Error('缺少有效的发布请求身份');
+      }
+      body.public_route_type = publication.public_route_type;
+      body.publication_id = publication.publication_id;
+    }
+    const response = await api.post(`/api/v1/routes/${routeId}/status`, body);
+    const result = extractApiData(response);
+    if (targetStatus === 1) {
+      if (result?.is_public !== true || !result.published_version_id) {
+        throw new Error('未取得公开版本，发布尚未验证');
+      }
+      const publicResponse = await api.get(`/api/v1/public-routes/${routeId}`);
+      const detail = publicResponse.data?.data;
+      if (detail?.routeId !== routeId || detail.currentVersion?.versionId !== result.published_version_id) {
+        throw new Error('公共版本核验未通过，请使用原请求重试');
+      }
+    }
+    return result;
   },
 
   // 删除路线（软删除），被未取消行程引用时后端会拒绝

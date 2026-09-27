@@ -59,8 +59,10 @@ const AgentService = () => {
   const [currentTaskId, setCurrentTaskId] = useState(null);
   const [currentRouteId, setCurrentRouteId] = useState(null);
   const [kmlInputMode, setKmlInputMode] = useState('url'); // 'url' | 'file'
-  const [uploadedKmlContent, setUploadedKmlContent] = useState(null);
+  const [uploadedKmlUrl, setUploadedKmlUrl] = useState(null);
   const [uploadedFileName, setUploadedFileName] = useState(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const uploadSequenceRef = useRef(0);
 
   // SSE 进度状态
   const [taskProgress, setTaskProgress] = useState(null);
@@ -310,17 +312,25 @@ const AgentService = () => {
     }
   };
 
-  const handleFileUpload = (file) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setUploadedKmlContent(e.target.result);
+  const handleFileUpload = async (file) => {
+    const sequence = ++uploadSequenceRef.current;
+    setUploadedKmlUrl(null);
+    setUploadedFileName(null);
+    setUploadLoading(true);
+    try {
+      const result = await routeApi.uploadKml(file);
+      if (sequence !== uploadSequenceRef.current) return false;
+      if (!result?.kml_url) throw new Error('上传未返回 KML 地址');
+      setUploadedKmlUrl(result.kml_url);
       setUploadedFileName(file.name);
-      message.success(`已加载文件: ${file.name}`);
-    };
-    reader.onerror = () => {
-      message.error('文件读取失败');
-    };
-    reader.readAsText(file, 'UTF-8');
+      message.success(`已上传文件: ${file.name}`);
+    } catch (error) {
+      if (sequence === uploadSequenceRef.current) {
+        message.error(error.response?.data?.message || error.message || '文件上传失败');
+      }
+    } finally {
+      if (sequence === uploadSequenceRef.current) setUploadLoading(false);
+    }
     return false;
   };
 
@@ -334,23 +344,19 @@ const AgentService = () => {
       message.error('请输入 KML 文件 URL');
       return;
     }
-    if (kmlInputMode === 'file' && !uploadedKmlContent) {
-      message.error('请选择 KML 文件');
+    if (kmlInputMode === 'file' && !uploadedKmlUrl) {
+      message.error('请先上传 KML 文件');
       return;
     }
 
     setSubmitLoading(true);
     try {
       const requestData = {
-        kml_source: kmlInputMode === 'url' ? values.kml_source : (uploadedFileName || 'uploaded.kml'),
+        kml_source: kmlInputMode === 'url' ? values.kml_source : uploadedKmlUrl,
         enable_content_generation: values.enable_content_generation,
         enable_poi_query: values.enable_poi_query,
         poi_search_radius: values.poi_search_radius,
       };
-
-      if (kmlInputMode === 'file' && uploadedKmlContent) {
-        requestData.kml_content = uploadedKmlContent;
-      }
 
       // 关联路线：有选择则传 route_id，否则后端自动创建
       if (values.route_id) {
@@ -371,16 +377,28 @@ const AgentService = () => {
       const taskId = response.task_id;
 
       setCurrentTaskId(taskId);
-      setCurrentRouteId(null); // 等待 SSE completed 事件携带 routeId
+      setCurrentRouteId(response.route_id);
+      if (response.route_id) form.setFieldValue('route_id', response.route_id);
 
-      const routeHint = values.route_id ? `已绑定路线 ${values.route_id}` : '将自动创建新路线';
+      const routeHint = `已绑定路线 ${response.route_id || values.route_id}`;
       message.success(`任务已提交（${routeHint}），任务ID: ${taskId}`);
 
       // 4.1: 提交成功后立即建立 SSE 连接
       connectSse(taskId);
     } catch (error) {
       console.error('提交任务失败:', error);
-      message.error('提交分析任务失败');
+      const details = error.response?.data?.data?.details;
+      const errorMessage = error.response?.data?.message || error.message || '提交分析任务失败';
+      if (details?.route_id) {
+        setCurrentRouteId(details.route_id);
+        form.setFieldValue('route_id', details.route_id);
+      }
+      if (details?.task_id) {
+        setCurrentTaskId(details.task_id);
+        setTaskProgress({ status: 'failed', error: errorMessage, routeId: details.route_id });
+        closeEventSource();
+      }
+      message.error(errorMessage);
     } finally {
       setSubmitLoading(false);
     }
@@ -476,6 +494,7 @@ const AgentService = () => {
               <span style={{ color: '#666' }}>任务 ID:</span>
               <Text code>{currentTaskId}</Text>
               {getStatusTag()}
+              {currentRouteId && <Button type="link" onClick={() => navigate(`/routes?highlight=${currentRouteId}`)}>查看路线 {currentRouteId}</Button>}
             </Space>
           </div>
 
@@ -652,7 +671,9 @@ const AgentService = () => {
               value={kmlInputMode}
               onChange={(e) => {
                 setKmlInputMode(e.target.value);
-                setUploadedKmlContent(null);
+                uploadSequenceRef.current++;
+                setUploadLoading(false);
+                setUploadedKmlUrl(null);
                 setUploadedFileName(null);
               }}
               style={{ marginBottom: 12 }}
@@ -677,7 +698,7 @@ const AgentService = () => {
                   showUploadList={false}
                   maxCount={1}
                 >
-                  <Button icon={<UploadOutlined />}>选择 KML 文件</Button>
+                  <Button icon={<UploadOutlined />} loading={uploadLoading}>上传 KML 文件</Button>
                 </Upload>
                 {uploadedFileName && (
                   <div style={{ marginTop: 8, color: '#52c41a' }}>
@@ -686,7 +707,7 @@ const AgentService = () => {
                       type="link"
                       size="small"
                       danger
-                      onClick={() => { setUploadedKmlContent(null); setUploadedFileName(null); }}
+                      onClick={() => { uploadSequenceRef.current++; setUploadedKmlUrl(null); setUploadedFileName(null); setUploadLoading(false); }}
                       style={{ marginLeft: 8 }}
                     >
                       移除
@@ -783,7 +804,7 @@ const AgentService = () => {
               htmlType="submit"
               icon={<PlayCircleOutlined />}
               loading={submitLoading}
-              disabled={!healthStatus}
+              disabled={!healthStatus || uploadLoading}
             >
               提交分析任务
             </Button>

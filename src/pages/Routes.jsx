@@ -402,6 +402,10 @@ const Routes = () => {
   const [editRoute, setEditRoute] = useState(null);
   const [editForm, setEditForm] = useState({ name: '', description: '', region: '', difficulty: 2, is_loop: false });
   const [editSubmitting, setEditSubmitting] = useState(false);
+  const [publicationRoute, setPublicationRoute] = useState(null);
+  const [publicRouteType, setPublicRouteType] = useState(undefined);
+  const [publishing, setPublishing] = useState(false);
+  const publicationRequestsRef = useRef({});
 
   useEffect(() => {
     loadRoutes();
@@ -546,15 +550,57 @@ const Routes = () => {
   };
 
   // ===================== 路线状态流转 / 删除（管理端） =====================
+  const openPublication = (route) => {
+    setPublicationRoute(route);
+    setPublicRouteType(publicationRequestsRef.current[route.id]?.public_route_type);
+  };
+
+  const handlePublication = async () => {
+    if (!publicRouteType) {
+      message.warning('请选择公共路线类型');
+      return;
+    }
+    const route = publicationRoute;
+    const previous = publicationRequestsRef.current[route.id];
+    const publication = previous?.public_route_type === publicRouteType ? previous : {
+      public_route_type: publicRouteType,
+      publication_id: crypto.randomUUID(),
+    };
+    publicationRequestsRef.current[route.id] = publication;
+    setPublishing(true);
+    try {
+      await routeApi.changeRouteStatus(route.id, 1, null, publication);
+      delete publicationRequestsRef.current[route.id];
+      setPublicationRoute(null);
+      message.success('发布完成，公共版本已核验');
+      loadRoutes();
+    } catch (error) {
+      const detail = error.response?.data?.message || error.message;
+      if (error.response?.status === 409) {
+        Modal.confirm({
+          title: '发布请求冲突',
+          content: `${detail}。可保留原请求，或确认清除该请求身份，再点击发布发起新操作；不会自动重新发布。`,
+          okText: '准备新发布',
+          cancelText: '保留原请求',
+          onOk: () => { delete publicationRequestsRef.current[route.id]; },
+        });
+      } else {
+        Modal.warning({ title: '发布未验证', content: detail });
+      }
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   const handleStatusChange = async (route, targetStatus) => {
     try {
       await routeApi.changeRouteStatus(route.id, targetStatus);
+      delete publicationRequestsRef.current[route.id];
       message.success(`路线已${getRouteStatusText(targetStatus)}`);
       loadRoutes();
     } catch (error) {
       console.error('状态流转失败:', error);
-      const msg = error.response?.data?.message || '状态流转失败';
-      // 发布前检查失败等场景，弹窗展示完整原因
+      const msg = error.response?.data?.message || error.message || '状态流转失败';
       Modal.warning({ title: '操作未完成', content: msg });
     }
   };
@@ -926,28 +972,15 @@ const Routes = () => {
               编辑
             </Button>
           )}
-          {record.status === 0 && (
-            <Popconfirm
-              title="发布该路线？"
-              description="发布前会自动检查轨迹数据与未采纳草稿"
-              onConfirm={() => handleStatusChange(record, 1)}
-            >
-              <Button size="small" type="primary" ghost icon={<SendOutlined />}>
-                发布
-              </Button>
-            </Popconfirm>
+          {record.status !== 3 && (
+            <Button size="small" type="primary" ghost icon={<SendOutlined />} onClick={() => openPublication(record)}>
+              {record.status === 0 ? '发布' : '重新发布'}
+            </Button>
           )}
           {record.status === 1 && (
             <Popconfirm title="下线该路线？下线后 C 端不可见，路线回到规划中。" onConfirm={() => handleStatusChange(record, 0)}>
               <Button size="small" icon={<StopOutlined />}>
                 下线
-              </Button>
-            </Popconfirm>
-          )}
-          {record.status === 2 && (
-            <Popconfirm title="重新发布该路线？" onConfirm={() => handleStatusChange(record, 1)}>
-              <Button size="small" type="primary" ghost icon={<SendOutlined />}>
-                重新发布
               </Button>
             </Popconfirm>
           )}
@@ -994,6 +1027,16 @@ const Routes = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>路线管理</h2>
       </div>
+
+      <Modal title={`发布路线：${publicationRoute?.name || ''}`} open={!!publicationRoute}
+        onOk={handlePublication} onCancel={() => !publishing && setPublicationRoute(null)}
+        confirmLoading={publishing} okText="发布并核验" cancelButtonProps={{ disabled: publishing }}>
+        <p>将当前管理资料发布为新的公共版本。未审核轨迹不会被标记为有效。</p>
+        <Select aria-label="公共路线类型" placeholder="请选择公共路线类型" style={{ width: '100%' }}
+          value={publicRouteType} onChange={setPublicRouteType} disabled={publishing}
+          options={[{ value: 'one_day', label: '单日路线' }, { value: 'multi_day', label: '多日路线' }]} />
+        <p style={{ color: '#888' }}>核验失败后可直接重试，同一请求不会重复创建版本。</p>
+      </Modal>
 
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
