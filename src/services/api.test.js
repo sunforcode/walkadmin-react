@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
+import { BlobWriter, TextReader, ZipWriter } from '@zip.js/zip.js';
 
 // Vite injects import.meta.env; use its default values in this Node harness.
 const source = (await readFile(new URL('./api.js', import.meta.url), 'utf8'))
   .replace("from 'axios'", `from '${import.meta.resolve('axios')}'`)
+  .replace("from './kmzInput.js'", `from '${new URL('./kmzInput.js', import.meta.url).href}'`)
   .replaceAll('import.meta.env', '({})');
 const { default: api, routeApi } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 globalThis.localStorage = { getItem: () => null };
@@ -90,6 +92,46 @@ test('file selection uploads KML and retains the returned durable reference', as
   assert.equal(reference, '/static/kml-upload/saved.kml');
 });
 
+test('KMZ upload submits only the unchanged KML through the existing endpoint', async () => {
+  const kml = '<kml xmlns:gx="http://www.google.com/kml/ext/2.2"><gx:Track><when>2026-07-20T05:45:43Z</when></gx:Track></kml>';
+  const zip = new ZipWriter(new BlobWriter(), { useWebWorkers: false });
+  await zip.add('doc.kml', new TextReader(kml));
+  await zip.add('files/photo.png', new TextReader('photo'));
+  const input = new File([await zip.close()], '亚丁.kmz');
+  let uploaded;
+  api.defaults.adapter = async (config) => {
+    assert.equal(config.url, '/api/v1/route-analysis/kml/upload');
+    uploaded = config.data.get('file');
+    return respond(config, { success: true, data: { kml_url: '/static/kml-upload/saved.kml', file_size: uploaded.size } });
+  };
+  const result = await routeApi.uploadKml(input);
+  assert.equal(uploaded.name, '亚丁.kml');
+  assert.equal(await uploaded.text(), kml);
+  assert.equal(result.kml_url, '/static/kml-upload/saved.kml');
+});
+
+test('invalid KMZ is rejected before any upload request', async () => {
+  let calls = 0;
+  api.defaults.adapter = async (config) => { calls++; return respond(config, {}); };
+  await assert.rejects(routeApi.uploadKml(new File(['invalid'], 'bad.kmz')), /KMZ/);
+  assert.equal(calls, 0);
+});
+
+test('ordinary KML upload keeps the same file and response contract', async () => {
+  const input = new File(['<kml/>'], 'route.kml');
+  api.defaults.adapter = async (config) => {
+    assert.equal(config.data.get('file'), input);
+    return respond(config, { success: true, data: { kml_url: '/static/kml-upload/plain.kml', file_size: input.size } });
+  };
+  assert.deepEqual(await routeApi.uploadKml(input), { kml_url: '/static/kml-upload/plain.kml', file_size: input.size });
+});
+
+test('analysis file picker accepts KMZ and explains that photos are not uploaded', async () => {
+  const page = await readFile(new URL('../pages/AgentService.jsx', import.meta.url), 'utf8');
+  assert.match(page, /accept="\.kml,\.xml,\.kmz"/);
+  assert.match(page, /图片不上传/);
+});
+
 test('publication page keeps request identity across failed verification and retry', async () => {
   const page = await readFile(new URL('../pages/Routes.jsx', import.meta.url), 'utf8');
   const handler = page.slice(page.indexOf('  const handlePublication ='), page.indexOf('  const handleStatusChange ='));
@@ -136,4 +178,16 @@ test('expired publication identity requires explicit reset before a new request'
   confirmation.onOk();
   await publish();
   assert.equal(sent, 'new-request');
+});
+
+test('web deployment validates its target and syncs without recursive deletion', async () => {
+  const workflow = await readFile(new URL('../../.github/workflows/deploy.yml', import.meta.url), 'utf8');
+  assert.equal(/\brm\s+[^\n]*-[a-zA-Z]*r/.test(workflow), false, 'deployment must not recursively delete a directory');
+  assert.equal(workflow.includes('--delete'), false, 'deployment sync must not delete remote-only files');
+  assert.ok(workflow.includes('Validate deployment target'));
+  assert.ok(workflow.includes('test -d'));
+  assert.ok(workflow.includes('--exclude=\'.env\''));
+  assert.ok(workflow.includes('--exclude=\'.env.*\''));
+  assert.ok(workflow.includes('BatchMode=yes'));
+  assert.equal(workflow.includes('hex dump'), false, 'deployment must not print secret configuration');
 });

@@ -1,0 +1,17 @@
+# 构建上下文排除项
+# node_modules 必须排除：镜像内由 npm ci 重新安装，
+# 且本地是 macOS/arm64 产物，直接带入会与 Linux 容器不兼容。
+node_modules
+dist
+.git
+.gitignore
+
+# 环境变量文件不进镜像：避免把本地配置或密钥固化进产物
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log
+Dockerfile
+.dockerignore

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { prepareKmlUpload } from './kmzInput.js';
 
 /**
  * 后端 API 基地址。
@@ -235,10 +236,11 @@ export const routeApi = {
     return extractApiData(response);
   },
 
-  // 上传 KML 文件，返回 { kml_url, file_size }（kml_url 为相对路径）
+  // KMZ is unpacked locally; the upload contract remains a single KML file.
   uploadKml: async (file) => {
+    const kmlFile = await prepareKmlUpload(file);
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', kmlFile);
     const response = await api.post('/api/v1/route-analysis/kml/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 60000,

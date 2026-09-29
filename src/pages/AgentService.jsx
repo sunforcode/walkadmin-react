@@ -323,7 +323,9 @@ const AgentService = () => {
       if (!result?.kml_url) throw new Error('上传未返回 KML 地址');
       setUploadedKmlUrl(result.kml_url);
       setUploadedFileName(file.name);
-      message.success(`已上传文件: ${file.name}`);
+      message.success(/\.kmz$/i.test(file.name)
+        ? `已提取并上传 KML：${file.name}（图片不上传）`
+        : `已上传文件: ${file.name}`);
     } catch (error) {
       if (sequence === uploadSequenceRef.current) {
         message.error(error.response?.data?.message || error.message || '文件上传失败');
@@ -693,13 +695,16 @@ const AgentService = () => {
             ) : (
               <div>
                 <Upload
-                  accept=".kml,.xml"
+                  accept=".kml,.xml,.kmz"
                   beforeUpload={handleFileUpload}
                   showUploadList={false}
                   maxCount={1}
                 >
-                  <Button icon={<UploadOutlined />} loading={uploadLoading}>上传 KML 文件</Button>
+                  <Button icon={<UploadOutlined />} loading={uploadLoading}>上传 KML / KMZ 文件</Button>
                 </Upload>
+                <div style={{ marginTop: 8 }}>
+                  <Text type="secondary">KMZ 仅提取 KML 轨迹原文，图片不上传；KML 原文上限 20MiB。</Text>
+                </div>
                 {uploadedFileName && (
                   <div style={{ marginTop: 8, color: '#52c41a' }}>
                     <CheckCircleOutlined /> 已选择：{uploadedFileName}

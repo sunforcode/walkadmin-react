@@ -7,11 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "node --test src/pages/agentServiceHelpers.test.js src/services/api.test.js",
+    "test": "node --test src/pages/agentServiceHelpers.test.js src/services/api.test.js src/services/kmzInput.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
     "@ant-design/icons": "^6.2.2",
+    "@zip.js/zip.js": "2.18.2",
     "antd": "^6.3.7",
     "axios": "^1.15.2",
     "leaflet": "^1.9.4",

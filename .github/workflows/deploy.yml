@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy web to walk-server
@@ -16,57 +20,56 @@ jobs:
       - name: Checkout walkadmin-react
         uses: actions/checkout@v4
 
+      - name: Validate deployment target
+        env:
+          WALK_SERVER: ${{ secrets.WALK_SERVER }}
+          WALK_REMOTE_DIR: ${{ secrets.WALK_REMOTE_DIR }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$WALK_SERVER" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]; then
+            echo "::error::WALK_SERVER must be a non-empty user@host without whitespace."
+            exit 1
+          fi
+          if [[ ! "$WALK_REMOTE_DIR" =~ ^/[a-zA-Z0-9_/-]+$ ]] || [[ "$WALK_REMOTE_DIR" == / ]]; then
+            echo "::error::WALK_REMOTE_DIR must be an absolute project directory."
+            exit 1
+          fi
+
       - name: Configure SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Debug WALK_SERVER value
-        env:
-          WALK_SERVER: ${{ secrets.WALK_SERVER }}
-        run: |
-          echo "WALK_SERVER length: ${#WALK_SERVER}"
-          echo "WALK_SERVER hex dump:"
-          printf '%s' "$WALK_SERVER" | xxd | head -5
-          echo "---"
-          # 如果值含换行/空格，ssh 会报 hostname contains invalid characters
-          CLEAN=$(printf '%s' "$WALK_SERVER" | tr -d '\n\r')
-          if [ "$CLEAN" != "$WALK_SERVER" ]; then
-            echo "::error::WALK_SERVER contains newline/carriage return — secret value is dirty. Re-save it without trailing newline."
-          fi
 
       - name: Trust server host key
         env:
           WALK_SERVER: ${{ secrets.WALK_SERVER }}
         run: |
           mkdir -p ~/.ssh
-          # 去掉可能的前后空白/换行，再取 hostname 部分做 keyscan
-          HOST=$(printf '%s' "$WALK_SERVER" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          ssh-keyscan -H "${HOST##*@}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${WALK_SERVER##*@}" >> ~/.ssh/known_hosts
 
       - name: Sync code to server
         env:
           WALK_SERVER: ${{ secrets.WALK_SERVER }}
           WALK_REMOTE_DIR: ${{ secrets.WALK_REMOTE_DIR }}
         run: |
-          # 清洗 secret 值中可能混入的换行/回车/前后空格
-          HOST=$(printf '%s' "$WALK_SERVER" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          # tar + ssh 替代 rsync：避免 CI runner 上 rsync 偶发退出码非零的问题。
-          # 先清空目标目录（保留 .env 和 compose 无关文件），再解压新代码。
-          ssh "$HOST" "rm -rf $WALK_REMOTE_DIR/walkadmin-react && mkdir -p $WALK_REMOTE_DIR/walkadmin-react"
+          set -euo pipefail
+          # Verify the existing project before creating or updating its web directory.
+          ssh -o BatchMode=yes "$WALK_SERVER" "test -d '$WALK_REMOTE_DIR/deploy' && test -f '$WALK_REMOTE_DIR/deploy/docker-compose.yml' && test ! -L '$WALK_REMOTE_DIR/walkadmin-react' && mkdir -p '$WALK_REMOTE_DIR/walkadmin-react'"
+          # Overlay tracked source only; preserve remote-only files and never send credentials.
           tar czf - \
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='dist' \
+            --exclude='.env' \
+            --exclude='.env.*' \
             . \
-            | ssh "$HOST" "tar xzf - -C $WALK_REMOTE_DIR/walkadmin-react/"
-          ssh "$HOST" "test -f $WALK_REMOTE_DIR/walkadmin-react/Dockerfile" || { echo "Sync failed: Dockerfile missing"; exit 1; }
+            | ssh -o BatchMode=yes "$WALK_SERVER" "tar xzf - -C '$WALK_REMOTE_DIR/walkadmin-react/'"
+          ssh -o BatchMode=yes "$WALK_SERVER" "test -f '$WALK_REMOTE_DIR/walkadmin-react/Dockerfile'"
 
       - name: Build and restart web
         env:
           WALK_SERVER: ${{ secrets.WALK_SERVER }}
           WALK_REMOTE_DIR: ${{ secrets.WALK_REMOTE_DIR }}
         run: |
-          HOST=$(printf '%s' "$WALK_SERVER" | tr -d '\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          ssh "$HOST" "cd $WALK_REMOTE_DIR/deploy && docker compose build web"
-          ssh "$HOST" "cd $WALK_REMOTE_DIR/deploy && docker compose up -d web"
+          set -euo pipefail
+          ssh -o BatchMode=yes "$WALK_SERVER" "cd '$WALK_REMOTE_DIR/deploy' && docker compose build web && docker compose up -d --no-deps web"
