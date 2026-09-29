@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "node --test src/pages/agentServiceHelpers.test.js src/services/api.test.js src/services/kmzInput.test.js",
+    "test": "node --test src/pages/agentServiceHelpers.test.js src/services/api.test.js src/services/kmzInput.test.js src/services/trackReview.test.js src/components/TrackReviewPanel.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Table, Button, Space, Tag, Modal, Descriptions, Input, Select, message, Spin, Tabs, Collapse, Badge, InputNumber, Progress, Checkbox, Popconfirm } from 'antd';
 import { SearchOutlined, ReloadOutlined, EyeOutlined, EnvironmentOutlined, ThunderboltOutlined, PlusOutlined, CheckOutlined, ScissorOutlined, RocketOutlined, AimOutlined, EditOutlined, MergeCellsOutlined, RobotOutlined, DeleteOutlined, SendOutlined, StopOutlined, CloudUploadOutlined } from '@ant-design/icons';
 import { routeApi, agentServiceApi, formatTimestamp, getDifficultyText, getDifficultyTagColor, getRouteStatusText, getRouteStatusColor } from '../services/api';
+import TrackReviewPanel from '../components/TrackReviewPanel';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -27,17 +28,17 @@ const SEG_COLORS = [
   '#5c6bc0', '#6a1b9a', '#259324', '#ad1457',
 ];
 const getSegColor = (i) => SEG_COLORS[i % SEG_COLORS.length];
+const EMPTY_MAP_ITEMS = [];
 
 /**
  * 共享地图组件
  * @param {object} route 路线详情（含 track_points）
  * @param {string} mode 'segments'（分段彩色渲染）| 'pois'（POI 标记）
- * @param {Array} segments 分段列表（mode=segments 时渲染）
+ * @param {Array} segments 当前方案分段列表（mode=segments 时渲染）
  * @param {Array} pois POI 列表（mode=pois 时渲染标记）
  * @param {object} focus 外部定位触发 { type: 'segment'|'poi', id, ts }
- * @param {Array} overlaySegments 叠加细分段（如按天视图下嵌套的坡度段），粗半透明主线之上绘制细实线
  */
-const RouteMap = ({ route, mode, segments = [], pois = [], focus = null, overlaySegments = null }) => {
+const RouteMap = ({ route, mode, segments = EMPTY_MAP_ITEMS, pois = EMPTY_MAP_ITEMS, focus = null }) => {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markerRefs = useRef({});
@@ -53,7 +54,7 @@ const RouteMap = ({ route, mode, segments = [], pois = [], focus = null, overlay
     .sort((a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0))
     .filter((tp) => tp.latitude != null && tp.longitude != null)
     .map((tp) => [tp.latitude, tp.longitude]);
-  const trackLatLngs = trackPath.length > 1
+  const trackLatLngs = trackPath.length > 0
     ? trackPath.map((p) => [p[0], p[1]])
     : waypointTrack;
 
@@ -106,20 +107,20 @@ const RouteMap = ({ route, mode, segments = [], pois = [], focus = null, overlay
         weight: 2,
         opacity: 0.6,
       }).addTo(map);
+    } else if (trackLatLngs.length === 1) {
+      L.circleMarker(trackLatLngs[0], { radius: 6, color: '#1677ff' }).addTo(map);
     }
 
-    // 分段彩色渲染
+    // review-public-main-track-and-isolate-schemes：只绘制当前方案。
     if (mode === 'segments') {
-      const useOverlay = Array.isArray(overlaySegments) && overlaySegments.length > 0;
       segments.forEach((seg, i) => {
         const slice = getSegmentSlice(seg);
         if (slice.length < 2) return;
         const color = seg.color || getSegColor(i);
-        // 有叠加细分段时，主线用粗半透明“底色带”表示天，细实线留给坡度段
         const line = L.polyline(slice, {
           color,
-          weight: useOverlay ? 9 : 5,
-          opacity: useOverlay ? 0.35 : 0.9,
+          weight: 5,
+          opacity: 0.9,
         }).addTo(map);
         line.bindPopup(
           `<b><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;"></span>${seg.name || `路段${i + 1}`}</b><br/>` +
@@ -130,26 +131,6 @@ const RouteMap = ({ route, mode, segments = [], pois = [], focus = null, overlay
         segLineRefs.current[seg.id] = line;
         segBoundsRefs.current[seg.id] = L.latLngBounds(slice);
       });
-      // 叠加细分段（如按天视图下的坡度段）：细实线 + 调色板颜色，可定位
-      if (useOverlay) {
-        overlaySegments.forEach((seg, i) => {
-          const slice = getSegmentSlice(seg);
-          if (slice.length < 2) return;
-          const color = getSegColor(i);
-          const line = L.polyline(slice, {
-            color,
-            weight: 4,
-            opacity: 0.95,
-          }).addTo(map);
-          line.bindPopup(
-            `<b><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px;"></span>${seg.name || `路段${i + 1}`}</b><br/>` +
-            `${seg.distance ? `距离 ${seg.distance} km<br/>` : ''}` +
-            `${seg.elevation_gain ? `爬升 ${seg.elevation_gain} m<br/>` : ''}`
-          );
-          segLineRefs.current[seg.id] = line;
-          segBoundsRefs.current[seg.id] = L.latLngBounds(slice);
-        });
-      }
       if (segBoundsRefs.current && Object.keys(segBoundsRefs.current).length > 0) {
         const all = Object.values(segBoundsRefs.current);
         const bounds = all[0];
@@ -192,67 +173,71 @@ const RouteMap = ({ route, mode, segments = [], pois = [], focus = null, overlay
       segLineRefs.current = {};
       segBoundsRefs.current = {};
     };
+    // 数据替换先移除旧地图及 SVG 图层，focus/勾选变化不重建地图。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [route, mode, segments, pois]);
 
-  // 外部定位触发
+  // 外部定位触发；清理必须覆盖换焦点、换数据和卸载。
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !focus || !focus.id || !focus.ts) return;
+    let timer;
+    let focusedLine;
     if (focus.type === 'poi') {
       const poi = pois.find((p) => p.id === focus.id);
       if (!poi || poi.latitude == null) return;
       map.flyTo([poi.latitude, poi.longitude], 15, { duration: 0.8 });
       const m = markerRefs.current[poi.id];
-      if (m) setTimeout(() => m.openPopup(), 850);
+      if (m) timer = setTimeout(() => m.openPopup(), 850);
     } else if (focus.type === 'segment') {
       const bounds = segBoundsRefs.current[focus.id];
       if (!bounds) return;
       map.flyToBounds(bounds, { duration: 0.8 });
-      const line = segLineRefs.current[focus.id];
-      if (line) {
-        line.openPopup();
-        line.setStyle({ weight: 8 });
-        setTimeout(() => line.setStyle({ weight: 5 }), 1600);
+      focusedLine = segLineRefs.current[focus.id];
+      if (focusedLine) {
+        focusedLine.openPopup();
+        focusedLine.setStyle({ weight: 8 });
+        timer = setTimeout(() => focusedLine.setStyle({ weight: 5 }), 1600);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus?.ts]);
+    return () => {
+      if (timer != null) clearTimeout(timer);
+      if (mapRef.current === map) {
+        map.stop();
+        focusedLine?.setStyle({ weight: 5 });
+      }
+    };
+  }, [focus, route, mode, segments, pois]);
 
   return <div ref={containerRef} style={{ height: 340, borderRadius: 8, border: '1px solid #d9d9d9' }} />;
 };
 
-// 分段标签内容：默认平铺列表；按天方案且存在坡度方案时，按"天分组 + 组内坡度路段"嵌套展示
-const CombinedDaySegments = ({
-  route, days, slopeSegs = [], isDayScheme, schemeKey, focus, onFocus,
+// 地图、列表、选择和操作均只消费当前方案，不推导日与坡度的嵌套关系。
+const SchemeSegments = ({
+  route, segments, schemeKey, focus, onFocus,
   onAdopt, onRename, onSplit, renderStatusTag, selectedSegIds = [], onToggleSegSelect,
 }) => {
-  const combine = isDayScheme && slopeSegs.length > 0;
-
-  const segRow = (seg, i, opts = {}) => ({
+  const segRow = (seg, i) => ({
     key: seg.id || `s${i}`,
     label: (
       <span onClick={(e) => e.stopPropagation()}>
-        {!opts.noCheckbox && (
-          <Checkbox
-            checked={selectedSegIds.includes(seg.id)}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => onToggleSegSelect(seg.id, e.target.checked)}
-            style={{ marginRight: 8 }}
-          />
-        )}
+        <Checkbox
+          checked={selectedSegIds.includes(seg.id)}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onToggleSegSelect(seg.id, e.target.checked)}
+          style={{ marginRight: 8 }}
+        />
         <span
-          style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: opts.color || seg.color || getSegColor(i), marginRight: 6, cursor: 'pointer' }}
+          style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: seg.color || getSegColor(i), marginRight: 6, cursor: 'pointer' }}
           onClick={(e) => { e.stopPropagation(); onFocus({ type: 'segment', id: seg.id, ts: Date.now() }); }}
           title="在地图上定位"
         />
         {renderStatusTag(seg.status)}
-        <span style={{ fontWeight: opts.bold ? 600 : 500 }}>{seg.name || `路段${i + 1}`}</span>
+        <span style={{ fontWeight: 500 }}>{seg.name || `路段${i + 1}`}</span>
         <span style={{ color: '#999', marginLeft: 8 }}>
           {seg.distance ? seg.distance + ' km' : ''} {seg.elevation_gain ? '↑' + seg.elevation_gain + 'm' : ''}
         </span>
-        {!opts.noActions && (
-          <span style={{ float: 'right' }} onClick={(e) => e.stopPropagation()}>
+        <span style={{ float: 'right' }} onClick={(e) => e.stopPropagation()}>
             <Button size="small" type="link" icon={<AimOutlined />} onClick={() => onFocus({ type: 'segment', id: seg.id, ts: Date.now() })}>
               定位
             </Button>
@@ -271,8 +256,7 @@ const CombinedDaySegments = ({
                 拆分
               </Button>
             )}
-          </span>
-        )}
+        </span>
       </span>
     ),
     children: (
@@ -292,56 +276,18 @@ const CombinedDaySegments = ({
     ),
   });
 
-  const items = combine
-    ? days.map((day, di) => {
-        const inner = slopeSegs
-          .map((s, si) => ({ s, si }))
-          .filter(({ s }) =>
-            s.track_start_index != null &&
-            day.track_start_index != null &&
-            day.track_end_index != null &&
-            s.track_start_index >= day.track_start_index &&
-            s.track_start_index <= day.track_end_index
-          );
-        return {
-          ...segRow(day, di, { color: day.color || getSegColor(di), bold: true, noCheckbox: true, noActions: false }),
-          children: (
-            <>
-              {inner.length > 0 ? (
-                <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
-                  该天包含 {inner.length} 个坡度路段
-                </div>
-              ) : (
-                <div style={{ marginBottom: 8, color: '#999', fontSize: 12 }}>该天范围内无坡度路段</div>
-              )}
-              <Collapse
-                size="small"
-                items={inner.map(({ s, si }) => segRow(s, si, { color: s.color || getSegColor(si) }))}
-              />
-            </>
-          ),
-        };
-      })
-    : days.map((seg, i) => segRow(seg, i, { color: seg.color || getSegColor(i) }));
-
   return (
     <div>
       <div style={{ marginBottom: 10 }}>
         <RouteMap
-          key={`${schemeKey}-${combine ? 'combine' : 'flat'}`}
+          key={`${route.id}-${schemeKey}`}
           route={route}
           mode="segments"
-          segments={days}
-          overlaySegments={combine ? slopeSegs : null}
+          segments={segments}
           focus={focus}
         />
       </div>
-      {combine && (
-        <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
-          结合展示：地图上粗半透明色带为按天区间，细实线为坡度路段；点击色点或"定位"可在地图上聚焦。
-        </div>
-      )}
-      <Collapse size="small" items={items} />
+      <Collapse key={`${route.id}-${schemeKey}`} size="small" items={segments.map(segRow)} />
     </div>
   );
 };
@@ -358,6 +304,9 @@ const Routes = () => {
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  // 请求序号统一覆盖打开/刷新；session 使关闭前的操作与轮询失效。
+  const detailRequestRef = useRef({ routeId: null, sequence: 0, session: 0 });
+  const [detailSession, setDetailSession] = useState(0);
 
   // 手动创建路线
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -411,9 +360,12 @@ const Routes = () => {
     loadRoutes();
   }, [currentPage, pageSize, selectedStatus]);
 
-  // 卸载时清理轮询定时器
+  // 卸载时使在途详情请求、操作回调与轮询失效。
   useEffect(() => () => {
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    pollTimerRef.current = null;
+    const current = detailRequestRef.current;
+    detailRequestRef.current = { routeId: null, sequence: current.sequence + 1, session: current.session + 1 };
   }, []);
 
   const loadRoutes = async () => {
@@ -445,42 +397,81 @@ const Routes = () => {
     }
   };
 
-  const reloadRouteDetail = async (routeId) => {
-    try {
-      const detail = await routeApi.getRouteById(routeId || selectedRoute.id);
-      setSelectedRoute(detail);
-      if (activeSchemeId && !(detail.segment_schemes || []).some((s) => s.id === activeSchemeId)) {
-        setActiveSchemeId(null);
-      }
-      // 清理已不存在的选择项
-      setSelectedSegIds((prev) => prev.filter((id) =>
-        (detail.segment_schemes || []).some((s) => (s.segments || []).some((x) => x.id === id))
-      ));
-      setSelectedPoiIds((prev) => prev.filter((id) => (detail.poi_points || []).some((p) => p.id === id)));
-    } catch (error) {
-      console.error('刷新路线详情失败:', error);
-    }
-  };
-
-  const showRouteDetail = async (route) => {
-    setDetailModalVisible(true);
-    setSelectedRoute(route);
-    setDetailLoading(true);
-    setAnalysisProgress(null);
-    setKmlUrl('');
-    setActiveSchemeId(schemeSelectionRef.current[route.id] || null);
+  const resetDetailSelection = () => {
     setSelectedSegIds([]);
     setSelectedPoiIds([]);
+    setSegFocus(null);
+    setPoiFocus(null);
+  };
+
+  const loadRouteDetail = async (routeId) => {
+    const current = detailRequestRef.current;
+    if (!routeId || current.routeId !== routeId) return;
+    const request = { ...current, sequence: current.sequence + 1 };
+    detailRequestRef.current = request;
+    const isCurrent = () => detailRequestRef.current.routeId === routeId
+      && detailRequestRef.current.sequence === request.sequence
+      && detailRequestRef.current.session === request.session;
+    setDetailLoading(true);
     try {
-      const detail = await routeApi.getRouteById(route.id);
+      const detail = await routeApi.getRouteById(routeId);
+      if (!isCurrent()) return;
+      if (detail?.id !== routeId) throw new Error('路线详情身份不匹配');
+      const selectedScheme = schemeSelectionRef.current[routeId];
+      const schemeExists = (detail.segment_schemes || []).some((scheme) => scheme.id === selectedScheme);
+      if (!schemeExists) delete schemeSelectionRef.current[routeId];
+      setActiveSchemeId(schemeExists ? selectedScheme : null);
+      resetDetailSelection();
       setSelectedRoute(detail);
       setKmlUrl(detail.kml_url || '');
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('加载路线详情失败:', error);
       message.error('加载详情失败');
     } finally {
-      setDetailLoading(false);
+      if (isCurrent()) setDetailLoading(false);
     }
+  };
+
+  const reloadRouteDetail = async (routeId = selectedRoute?.id) => {
+    if (detailRequestRef.current.session !== detailSession || detailRequestRef.current.routeId !== routeId) return;
+    return loadRouteDetail(routeId);
+  };
+
+  const showRouteDetail = async (route) => {
+    stopPolling();
+    const current = detailRequestRef.current;
+    detailRequestRef.current = { routeId: route.id, sequence: current.sequence, session: current.session + 1 };
+    setDetailSession(current.session + 1);
+    setDetailModalVisible(true);
+    setSelectedRoute(route);
+    setAnalyzing(false);
+    setAnalysisProgress(null);
+    setKmlUrl('');
+    setActiveSchemeId(schemeSelectionRef.current[route.id] || null);
+    resetDetailSelection();
+    await loadRouteDetail(route.id);
+  };
+
+  const closeRouteDetail = () => {
+    stopPolling();
+    const current = detailRequestRef.current;
+    detailRequestRef.current = { routeId: null, sequence: current.sequence + 1, session: current.session + 1 };
+    setDetailSession(current.session + 1);
+    setAnalyzing(false);
+    setAnalysisProgress(null);
+    setDetailModalVisible(false);
+    setDetailLoading(false);
+    setSelectedRoute(null);
+    setActiveSchemeId(null);
+    resetDetailSelection();
+  };
+
+  const handleSchemeChange = (id) => {
+    if (detailRequestRef.current.session !== detailSession || detailRequestRef.current.routeId !== selectedRoute?.id) return;
+    setActiveSchemeId(id);
+    schemeSelectionRef.current[selectedRoute.id] = id;
+    resetDetailSelection();
   };
 
   // ===================== 手动创建路线 =====================
@@ -634,6 +625,10 @@ const Routes = () => {
   // ===================== KML 分析 =====================
   // useStored=true 时不传 kml_source，由后端回退使用该路线已存的 KML 数据重新分析
   const startAnalysis = async (useStored = false) => {
+    const routeId = selectedRoute?.id;
+    const isCurrentSession = () => detailRequestRef.current.routeId === routeId
+      && detailRequestRef.current.session === detailSession;
+    if (!routeId || !isCurrentSession()) return;
     if (!useStored && !kmlUrl.trim()) {
       message.warning('请输入 KML 文件 URL');
       return;
@@ -649,12 +644,15 @@ const Routes = () => {
         poi_search_radius: 500,
         region_name: selectedRoute.region || undefined,
       });
+      if (!isCurrentSession()) return;
       const taskId = result.task_id;
       message.success('分析任务已提交');
       stopPolling();
-      pollTimerRef.current = setInterval(async () => {
+      const pollTimer = setInterval(async () => {
+        if (!isCurrentSession() || pollTimerRef.current !== pollTimer) return;
         try {
           const status = await agentServiceApi.getTaskStatus(taskId);
+          if (!isCurrentSession() || pollTimerRef.current !== pollTimer) return;
           setAnalysisProgress({
             progress: status.progress || 0,
             current_step: status.current_step || '',
@@ -666,20 +664,22 @@ const Routes = () => {
             setAnalysisProgress(null);
             message.success('KML 分析完成，结果已写入草稿，请采纳或调整');
             setActiveSchemeId(null);
-            setSelectedSegIds([]);
-            reloadRouteDetail(selectedRoute.id);
+            resetDetailSelection();
+            reloadRouteDetail(routeId);
           } else if (status.status === 'failed') {
             stopPolling();
             setAnalyzing(false);
             message.error(`分析失败: ${status.error || '未知错误'}`);
             setAnalysisProgress(null);
-            reloadRouteDetail(selectedRoute.id);
+            reloadRouteDetail(routeId);
           }
         } catch (err) {
-          console.error('查询任务状态失败:', err);
+          if (isCurrentSession() && pollTimerRef.current === pollTimer) console.error('查询任务状态失败:', err);
         }
       }, 5000);
+      pollTimerRef.current = pollTimer;
     } catch (error) {
+      if (!isCurrentSession()) return;
       console.error('提交分析任务失败:', error);
       message.error(error.response?.data?.message || '提交分析任务失败');
       setAnalyzing(false);
@@ -1247,17 +1247,9 @@ const Routes = () => {
       <Modal
         title="路线详情"
         open={detailModalVisible}
-        onCancel={() => {
-          stopPolling();
-          setAnalyzing(false);
-          setDetailModalVisible(false);
-        }}
+        onCancel={closeRouteDetail}
         footer={[
-          <Button key="close" onClick={() => {
-            stopPolling();
-            setAnalyzing(false);
-            setDetailModalVisible(false);
-          }}>
+          <Button key="close" onClick={closeRouteDetail}>
             关闭
           </Button>,
         ]}
@@ -1340,6 +1332,16 @@ const Routes = () => {
                 )
               },
               {
+                key: 'main-track-review',
+                label: '主轨迹审核',
+                children: (
+                  <TrackReviewPanel key={`${selectedRoute.id}:${detailSession}`} routeId={selectedRoute.id}
+                    analysisActive={analyzing || selectedRoute.status === 3}
+                    candidateRevision={selectedRoute.track_path}
+                    MapComponent={RouteMap} onReviewed={() => loadRoutes()} />
+                ),
+              },
+              {
                 key: 'segments',
                 label: (() => {
                   const segCount = activeSegments.length;
@@ -1360,7 +1362,7 @@ const Routes = () => {
                             <Select
                               style={{ minWidth: 220 }}
                               value={activeScheme?.id}
-                              onChange={(v) => { setActiveSchemeId(v); schemeSelectionRef.current[selectedRoute.id] = v; setSelectedSegIds([]); }}
+                              onChange={handleSchemeChange}
                               size="small"
                             >
                               {schemes.map((s) => (
@@ -1375,19 +1377,13 @@ const Routes = () => {
                   </div>
                 );
               }
-              // 按天方案下尝试取坡度方案做结合展示
-              const slopeScheme = activeScheme?.scheme_type === 'day'
-                ? schemes
-                    .filter((s) => s.scheme_type === 'slope')
-                    .sort((a, b) => (b.segments?.length || 0) - (a.segments?.length || 0))[0]
-                : null;
               return (
                 <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
                         <Select
                           style={{ minWidth: 220 }}
                           value={activeScheme?.id}
-                          onChange={(v) => { setActiveSchemeId(v); schemeSelectionRef.current[selectedRoute.id] = v; setSelectedSegIds([]); }}
+                          onChange={handleSchemeChange}
                           size="small"
                         >
                           {schemes.map((s) => (
@@ -1409,11 +1405,9 @@ const Routes = () => {
                           )}
                         </Space>
                       </div>
-                      <CombinedDaySegments
+                      <SchemeSegments
                         route={selectedRoute}
-                        days={activeSegments}
-                        slopeSegs={slopeScheme?.segments || []}
-                        isDayScheme={activeScheme?.scheme_type === 'day'}
+                        segments={activeSegments}
                         schemeKey={activeScheme?.id}
                         focus={segFocus}
                         onFocus={setSegFocus}

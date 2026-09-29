@@ -200,6 +200,35 @@ export const routeApi = {
     return extractApiData(response);
   },
 
+  getMainTrackReview: async (routeId) => {
+    const response = await api.get(`/api/v1/routes/${routeId}/main-track-review`);
+    return extractApiData(response);
+  },
+
+  submitMainTrackReview: async (routeId, request) => {
+    if (!request?.candidate_id?.trim() || !request.request_id?.trim() || request.request_id.length > 64
+      || !Number.isInteger(request.expected_revision) || request.expected_revision < 0) {
+      throw new Error('缺少有效候选、审核版本或请求身份，请刷新审核资料');
+    }
+    if (request.decision === 'approved') {
+      if (request.confirm_complete_hiking_range !== true || !request.reference_system?.trim()
+        || request.reference_system.length > 64) {
+        throw new Error('请明确确认完整徒步范围并选择坐标参考系统');
+      }
+    } else if (request.decision === 'rejected') {
+      if (request.confirm_complete_hiking_range !== false || request.reference_system != null || !request.reason?.trim()) {
+        throw new Error('驳回需填写原因，不能携带通过确认或坐标声明');
+      }
+    } else {
+      throw new Error('请选择通过或驳回');
+    }
+    if (request.reason != null && (!request.reason.trim() || request.reason.length > 1000)) {
+      throw new Error('审核原因必须为非空文字且不超过1000字');
+    }
+    const response = await api.post(`/api/v1/routes/${routeId}/main-track-review`, request);
+    return extractApiData(response);
+  },
+
   // 发布必须提供显式类型和可重试身份，并核验公共读取结果。
   changeRouteStatus: async (routeId, targetStatus, reason = null, publication = null) => {
     const body = { target_status: targetStatus, reason };
